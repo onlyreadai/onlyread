@@ -12,7 +12,7 @@ import { installAccountNudge } from './account-nudge';
 import { installAgentSetup } from './agent-setup';
 import { installAccountFrames } from './account-frames';
 import { installDemoCoach } from './demo-coach';
-import { setNoticeRoot } from './notice-root';
+import { setNoticeRoot, toastFramed } from './notice-root';
 import { findToast, holePath, watchAppearances } from './site-toast';
 
 const NAME_MAX = 80;
@@ -428,6 +428,7 @@ function placeFrame(): boolean {
   const b = box.getBoundingClientRect();
   const radius = Number.parseFloat(getComputedStyle(toast).borderTopLeftRadius) || 8;
   box.style.clipPath = holePath(b.width, b.height, { left: t.left - b.left, top: t.top - b.top, width: t.width, height: t.height }, radius);
+  toastFramed({ rect: t, radius });
   return true;
 }
 
@@ -442,6 +443,7 @@ function frameToast(): void {
 
 function unframeBox(): void {
   cancelAnimationFrame(toastFrame);
+  toastFramed(null);
   const box = parts?.box;
   if (!box) return;
   for (const k of ['left', 'bottom', 'minWidth', 'paddingBottom', 'clipPath'] as const) box.style[k] = '';

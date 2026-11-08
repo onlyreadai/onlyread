@@ -7,7 +7,8 @@
 import wordmarkUrl from '../../assets/wordmark-small.png';
 import { confettiBurst } from '../shared/confetti';
 import { NOTICE_MS } from '../shared/refusals';
-import { closeNotice, noticeBox } from './notice-root';
+import { type FramedToast, closeNotice, noticeBox, onToastFramed } from './notice-root';
+import { holePath } from './site-toast';
 
 type DemoView = { active: boolean; site?: string; name?: string; action?: string; hint?: string; change?: string; stopped?: string };
 type Phase = 'waiting' | 'stopped' | 'ended';
@@ -247,6 +248,22 @@ function frame(box: HTMLElement, c: HTMLElement, head: HTMLElement): void {
   c.style.bottom = `${Math.max(4, innerHeight - r.bottom - PAD)}px`;
   c.style.width = `${r.width + 2 * PAD}px`;
   c.style.height = `${r.height + 2 * PAD + headH + 8}px`;
+  cutToastWindow(c);
+}
+
+/** The site toast the notice frames, as it last reported it. */
+let framedToast: FramedToast | null = null;
+
+/** The notice frames the page's own toast with a window over it (actions.ts): the card and the backdrop, between the
+ *  notice and the page, get the same window, or it would show them, blurred, instead of the toast. */
+function cutToastWindow(c: HTMLElement): void {
+  const t = framedToast;
+  const backdrop = root?.querySelector<HTMLElement>('.backdrop');
+  if (!t) { c.style.clipPath = ''; if (backdrop) backdrop.style.clipPath = ''; return; }
+  const cr = c.getBoundingClientRect();
+  const at = (left: number, top: number) => ({ left: t.rect.left - left, top: t.rect.top - top, width: t.rect.width, height: t.rect.height });
+  c.style.clipPath = holePath(cr.width, cr.height, at(cr.left, cr.top), t.radius);
+  if (backdrop) backdrop.style.clipPath = holePath(innerWidth, innerHeight, at(0, 0), t.radius, 0);
 }
 
 function render(next: Phase): void {
@@ -293,6 +310,8 @@ function stopped(c: HTMLElement, body: HTMLElement): void {
     const box = noticeBox();
     if (box) {
       c.classList.add('framing');
+      onToastFramed((t) => { framedToast = t; cutToastWindow(c); });
+      c.addEventListener('transitionend', () => cutToastWindow(c)); // the card's own resize, done: the window lines up
       frame(box, c, head);
       framing?.disconnect();
       framing = new ResizeObserver(() => frame(box, c, head));
@@ -339,6 +358,8 @@ function hide(): void {
   watching = undefined;
   framing?.disconnect();
   framing = null;
+  onToastFramed(null);
+  framedToast = null;
   if (!card || !host) return;
   const h = host;
   card.classList.add('leaving');
