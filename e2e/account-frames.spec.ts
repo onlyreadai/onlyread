@@ -58,13 +58,62 @@ test('signed in, the account\'s page frames Activity and Security, sized to thei
     addEventListener('message', function on(e) { if (e.data?.source === 'onlyread-extension' && e.data.type === 'this-browser') { removeEventListener('message', on); resolve(e.data); } });
     postMessage({ source: 'onlyread-pro', type: 'which-browser', account: acct }, location.origin);
   }), account);
-  expect(await ask('test.user@example.com')).toMatchObject({ family: expect.stringMatching(/^[0-9a-f-]{36}$/) });
+  expect(await ask('test.user@example.com')).toMatchObject({ family: expect.stringMatching(/^[0-9a-f-]{36}$/), demo: true });
   expect(await ask('someone.else@example.com')).toEqual({ source: 'onlyread-extension', type: 'this-browser', reason: 'other-account' });
   // The page's own scripts cannot read inside.
   expect(await page.evaluate(() => {
     const f = document.querySelector('#activity iframe') as HTMLIFrameElement;
     try { return f.contentDocument === null && f.contentWindow?.document === undefined; } catch { return true; }
   })).toBe(true);
+  await page.close();
+});
+
+// The account page's "Try the demo" (in Pro mode this browser's own settings page is out of the way): a real click opens
+// the demo's choice of site; the page's own script clicking it, or a button naming another account, opens nothing.
+test('the account page\'s "Try the demo" opens the demo\'s choice of site, on a real click for this account only', async () => {
+  const setupOpen = () => h.ctx.pages().some((p) => p.url().endsWith('setup.html#demo'));
+  for (const p of h.ctx.pages().filter((x) => x.url().startsWith(extPage('setup.html')))) await p.close();
+  const page = await h.ctx.newPage();
+  await page.goto(framesPage('test.user@example.com'));
+  await page.evaluate(() => {
+    for (const [id, account] of [['demo-here', 'Test.User@example.com'], ['demo-other', 'someone.else@example.com']] as const) {
+      const b = document.createElement('button');
+      b.id = id; b.textContent = 'Try the demo'; b.dataset.onlyreadDemo = ''; b.dataset.account = account;
+      document.body.append(b);
+    }
+  });
+  await page.evaluate(() => (document.getElementById('demo-here') as HTMLButtonElement).click()); // the page's own script
+  await page.locator('#demo-other').click(); // a real click, another account
+  await page.waitForTimeout(1500);
+  expect(setupOpen()).toBe(false);
+  await page.locator('#demo-here').click();
+  await expect.poll(setupOpen, { timeout: 10_000 }).toBe(true);
+  await expect(h.ctx.pages().find((p) => p.url().endsWith('setup.html#demo'))!.locator('#step-demo')).toBeVisible();
+  for (const p of h.ctx.pages().filter((x) => x.url().startsWith(extPage('setup.html')))) await p.close();
+  await page.close();
+});
+
+// Framed, the section looks like the account page around it, whatever the extension's own setting: the page's light or
+// dark (`data-theme` on its <html>) as it opens and as it switches; the frame's colour scheme as the page's, or Chrome
+// paints the framed page's backdrop whole and square behind its round cards.
+test('the framed section follows the account page\'s light or dark, and switches with it', async () => {
+  await h.sw.evaluate(() => chrome.storage.local.set({ theme: 'dark' })); // the extension's own: dark
+  const page = await h.ctx.newPage();
+  await page.goto(framesPage('test.user@example.com'));
+  await page.evaluate(() => { document.documentElement.dataset.theme = 'light'; });
+  await page.evaluate(() => document.querySelector('#security')!.replaceChildren()); // framed afresh, the page light
+  const frame = page.frameLocator('#security iframe');
+  await expect(frame.locator('#security')).toBeVisible({ timeout: 10_000 });
+  const iframe = page.locator('#security iframe');
+  await expect.poll(() => frame.locator('html').getAttribute('data-theme')).toBe('light');
+  expect(await iframe.evaluate((f) => (f as HTMLIFrameElement).style.colorScheme)).toBe('light');
+  await page.evaluate(() => { document.documentElement.dataset.theme = 'dark'; });
+  await expect.poll(() => frame.locator('html').getAttribute('data-theme')).toBe('dark');
+  expect(await iframe.evaluate((f) => (f as HTMLIFrameElement).style.colorScheme)).toBe('dark');
+  await page.evaluate(() => { delete document.documentElement.dataset.theme; }); // the system's
+  await expect.poll(() => frame.locator('html').getAttribute('data-theme')).toBeNull();
+  expect(await iframe.evaluate((f) => (f as HTMLIFrameElement).style.colorScheme)).toBe('light dark');
+  await h.sw.evaluate(() => chrome.storage.local.remove('theme'));
   await page.close();
 });
 

@@ -153,7 +153,7 @@ export function storageLowering(key: GuardedKey, oldValue: unknown, newValue: un
 /** `page:frame-check` asks whether the Pro account page may frame this browser's own pages, and `page:which-browser`
  *  which row of its Browsers list this browser is: both change nothing and answer only the account's own page, for the
  *  account this browser is signed in to (messages.ts frameCheck, whichBrowser). */
-const CONTENT_SCRIPT_MESSAGES = new Set(['demo:state', 'demo:font', 'demo:skip', 'demo:done', 'ui:action', 'secret:typed', 'page:closing', 'page:account-saved', 'page:signin-code', 'page:signin-link', 'page:agent-setup-hello', 'page:account-changed', 'page:signed-out', 'page:frame-check', 'page:which-browser', 'page:agent-setup-apply', 'page:agent-setup-link', 'page:agent-setup-agent', 'guard:config', 'settings:open']);
+const CONTENT_SCRIPT_MESSAGES = new Set(['demo:state', 'demo:font', 'demo:skip', 'demo:done', 'ui:action', 'secret:typed', 'page:closing', 'page:account-saved', 'page:signin-code', 'page:signin-link', 'page:agent-setup-hello', 'page:account-changed', 'page:signed-out', 'page:frame-check', 'page:which-browser', 'page:open-demo', 'page:agent-setup-apply', 'page:agent-setup-link', 'page:agent-setup-agent', 'guard:config', 'settings:open']);
 
 /** Whether a message from this sender may be handled: OnlyRead's own pages may send anything; a content script
  *  (or anything else) only its few messages. */

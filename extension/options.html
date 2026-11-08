@@ -320,7 +320,7 @@
   .opt { display: flex; gap: 12px; align-items: flex-start; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; cursor: pointer; transition: border-color .15s, background .15s; }
   .opt:hover { border-color: var(--line-strong); }
   .opt:has(input:checked) { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 5%, var(--card)); }
-  .opt input { accent-color: var(--accent); margin: 3px 0 0; flex: none; width: 16px; height: 16px; }
+  .opt input { accent-color: var(--accent); margin: 3px 0 0; flex: none; width: 16px; height: 16px; border-radius: 50%; } /* round, so its focus outline is */
   .opt-body { display: grid; gap: 3px; }
   .opt-name { font-weight: 600; display: flex; align-items: center; gap: 8px; }
   .rec { font-size: 11px; font-weight: 600; padding: 2px 7px; border-radius: 999px; background: var(--chip); color: var(--accent-ink); }

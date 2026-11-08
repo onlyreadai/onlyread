@@ -21,14 +21,22 @@ export function installAccountNudge(): void {
     // Which row of the account page's Browsers list is this browser (the background answers the account's own page only).
     if (d.type === 'which-browser' && typeof d.account === 'string') whichBrowser(d.account);
   });
+  // The page's "Try the demo" (`data-onlyread-demo`, with the account it names in `data-account`): only a click the
+  // browser marks trusted counts, so the page's own script cannot open windows with it.
+  document.addEventListener('click', (e) => {
+    if (!e.isTrusted || !(e.target instanceof Element)) return;
+    const account = e.target.closest('[data-onlyread-demo]')?.getAttribute('data-account');
+    if (account) ask({ type: 'page:open-demo', account });
+  }, true);
 }
 
-function ask(msg: { type: string }): void {
+function ask(msg: { type: string; account?: string }): void {
   try { void chrome.runtime.sendMessage(msg).catch(() => {}); } catch { /* extension reloaded */ }
 }
 
 function whichBrowser(account: string): void {
   const reply = (r: { ok?: boolean; family?: string; reason?: string } | undefined) =>
-    window.postMessage({ source: 'onlyread-extension', type: 'this-browser', ...(r?.ok && r.family ? { family: r.family } : { reason: r?.reason ?? 'unavailable' }) }, location.origin);
+    // `demo`: this extension opens the demo from the page's "Try the demo" (below), so the page may show it.
+    window.postMessage({ source: 'onlyread-extension', type: 'this-browser', ...(r?.ok && r.family ? { family: r.family, demo: true } : { reason: r?.reason ?? 'unavailable' }) }, location.origin);
   try { void chrome.runtime.sendMessage({ type: 'page:which-browser', account }).then(reply, () => reply(undefined)); } catch { reply(undefined); }
 }

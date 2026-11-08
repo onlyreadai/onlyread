@@ -118,7 +118,8 @@ a:hover { text-decoration: underline; text-underline-offset: 2px; }
 
 input[type=text], input[type=password] { font: inherit; font-size: 13px; padding: 9px 12px; border-radius: 11px; border: 1px solid var(--line-strong); background: var(--card-2); color: var(--fg); transition: border-color .15s, box-shadow .15s; }
 input::placeholder { color: var(--faint); }
-input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 16%, transparent); }
+/* Text fields only: on a radio or a checkbox, whose box is square, the ring drew a square around the round control. */
+input:not([type=radio]):not([type=checkbox]):focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 16%, transparent); }
 
 /* Reduced motion: a slow spinner, no transitions */
 @media (prefers-reduced-motion: reduce) { .btn.busy::before { animation-duration: 2.4s; } * { transition: none !important; } }

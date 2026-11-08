@@ -36,10 +36,20 @@ async function frame(el: HTMLElement): Promise<void> {
   } catch { answer = undefined; } // the extension reloaded meanwhile
   if (!answer?.ok) { el.setAttribute(DONE, answer?.reason ?? 'unavailable'); return; }
   const iframe = document.createElement('iframe');
-  iframe.src = chrome.runtime.getURL(`options.html?framed=1#${section}`);
+  const theme = pageTheme();
+  iframe.src = chrome.runtime.getURL(`options.html?framed=1&theme=${theme}#${section}`);
   iframe.title = section === 'activity' ? 'OnlyRead activity in this browser' : 'OnlyRead protection in this browser';
-  iframe.style.cssText = 'display:block;width:100%;height:240px;border:0;background:transparent;color-scheme:normal';
+  iframe.style.cssText = `display:block;width:100%;height:240px;border:0;background:transparent;color-scheme:${FRAME_SCHEME[theme]}`;
   const origin = new URL(iframe.src).origin;
+  // The page's light or dark, as it is: sent on every load of the frame (a frame put back after the page dropped it
+  // loads afresh) and every time the page switches.
+  const sendTheme = () => {
+    const t = pageTheme();
+    iframe.style.colorScheme = FRAME_SCHEME[t];
+    iframe.contentWindow?.postMessage({ source: 'onlyread-page', theme: t }, origin);
+  };
+  iframe.addEventListener('load', sendTheme);
+  new MutationObserver(sendTheme).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
   addEventListener('message', (e: MessageEvent) => {
     if (e.source !== iframe.contentWindow || e.origin !== origin) return;
     const d = e.data as { source?: unknown; height?: unknown; dialog?: unknown } | null;
@@ -58,6 +68,17 @@ async function frame(el: HTMLElement): Promise<void> {
     el.replaceChildren(iframe);
   }).observe(el, { childList: true });
 }
+
+/** The account page's light or dark choice (`data-theme` on its <html>; none: the system's). */
+type PageTheme = 'light' | 'dark' | 'system';
+function pageTheme(): PageTheme {
+  const t = document.documentElement.dataset.theme;
+  return t === 'light' || t === 'dark' ? t : 'system';
+}
+
+/** The frame's colour scheme for a theme. Chrome paints a framed page's whole backdrop, square, when the frame's scheme
+ *  and the framed page's differ: as the page's, they never do, and the section's round cards show no corners or gap. */
+const FRAME_SCHEME: Record<PageTheme, string> = { light: 'light', dark: 'dark', system: 'light dark' };
 
 /** How many times a dropped frame is put back. */
 const MAX_RESTORES = 5;

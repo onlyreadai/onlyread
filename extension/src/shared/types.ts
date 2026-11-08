@@ -584,6 +584,7 @@ export type Message =
   | { type: 'page:signed-out'; account: string }
   | { type: 'page:frame-check'; account: string }
   | { type: 'page:which-browser'; account: string }
+  | { type: 'page:open-demo'; account: string }
   /** Content script: the setup page's Apply, really clicked. Only raises protection. */
   | { type: 'page:agent-setup-apply'; sites: string[]; allTabs: boolean }
   /** agent-setup page (content script) → background: a setup link's code, sent on load, or after a real click

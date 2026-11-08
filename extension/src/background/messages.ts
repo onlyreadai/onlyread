@@ -758,6 +758,16 @@ async function whichBrowser(msg: Of<'page:which-browser'>, sender: Sender) {
   return family ? { ok: true, family } : { ok: false, reason: 'unknown-account' };
 }
 
+/** The account page's "Try the demo", really clicked (content/account-nudge.ts): the demo's choice of site, in Pro mode
+ *  where this browser's own settings page is out of the way. The same checks as framing: the configured service's top
+ *  frame, signed in to the account the page names. Opens a window and changes nothing. */
+async function openDemoFromPage(msg: Of<'page:open-demo'>, sender: Sender) {
+  const check = await frameCheck({ type: 'page:frame-check', account: msg.account }, sender);
+  if (!check.ok) return check;
+  await openSetupWindow('demo');
+  return ok;
+}
+
 /** The account page's word that the account changed (content/account-nudge.ts): the lists are asked for now. Only
  *  from a top frame of the configured service, while signed in; at most once every two seconds. */
 let lastNudge = 0;
@@ -1357,6 +1367,7 @@ const HANDLERS: Handlers = {
   'page:signed-out': webSignedOut,
   'page:frame-check': frameCheck,
   'page:which-browser': whichBrowser,
+  'page:open-demo': openDemoFromPage,
   'page:signin-link': proSignInLink,
   'page:agent-setup-hello': setupHello,
   'page:agent-setup-apply': setupApply,

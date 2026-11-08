@@ -4,7 +4,15 @@
 // opened on its own, it stays blank. It tells that page its height, and when a dialog opens (a report, the PIN), so
 // the page can scroll it into view.
 
+import { applyTheme, normalizeTheme, type Theme } from '../shared/theme';
+
 const FRAMEABLE = new Set(['activity', 'security']);
+
+/** The account page's light or dark choice, as the frame was opened with it (content/account-frames.ts `theme`):
+ *  framed, the section looks like the page around it, whatever this extension's own setting is. */
+export function framedTheme(): Theme {
+  return normalizeTheme(new URLSearchParams(location.search).get('theme'));
+}
 
 /** The section asked for when the page is opened framed (options.html?framed=1#activity), or undefined. */
 export function framedSection(): string | undefined {
@@ -17,6 +25,14 @@ export function framedSection(): string | undefined {
 export function enterFramed(section: string): void {
   document.documentElement.classList.add('framed');
   document.getElementById(section)?.classList.add('framed-target');
+  // The page's light or dark, now and as it switches (content/account-frames.ts sends it on every load of the frame
+  // and on every switch). Listened for from the start, before the framing page is known: the look alone, and the page
+  // stays blank anyway unless the framing page is the service's (allowFrame).
+  addEventListener('message', (e: MessageEvent) => {
+    if (e.source !== window.parent) return;
+    const d = e.data as { source?: unknown; theme?: unknown } | null;
+    if (d?.source === 'onlyread-page' && d.theme !== undefined) applyTheme(normalizeTheme(d.theme));
+  });
 }
 
 /** Whether `ancestors` is exactly the Pro service's page: one ancestor, the service's origin. */

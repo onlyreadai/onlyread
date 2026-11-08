@@ -3,14 +3,14 @@ import type { ActivityItem, ActivitySummary, CloudStatus, Message, SettingsLock,
 import { agreeToJudge } from '../shared/consent-ui';
 import { accountActive, accountStatusText, cloudProblem, cloudUsage, proManaged, usagePercent } from '../shared/cloud-ui';
 import { $, faviconImg, iconImg, installIconFallbacks, lockedBy, send } from '../popup/ui';
-import { initTheme, normalizeTheme, setTheme, type Theme } from '../shared/theme';
+import { applyTheme, initTheme, normalizeTheme, setTheme, type Theme } from '../shared/theme';
 import { anthropicLine, mountByokForm } from '../shared/byok-form';
 import { exclusionLine, type OverviewButton, overviewAction, overviewFacts, overviewHeading, setupLine, siteSummary } from '../shared/status-text';
 import { relativeTime } from '../shared/refusals';
 import { installSidebar, reducedMotion, scrollToSection, setCount } from './sections';
 import { takeSignInResult } from '../shared/sign-in-result';
 import { MEGAPHONE, mountReport, openReport } from './report';
-import { allowFrame, enterFramed, framedSection } from './framed';
+import { allowFrame, enterFramed, framedSection, framedTheme } from './framed';
 import { mountScene } from '../shared/demo-scene';
 import { reloadOnDevBuild } from '../shared/dev-reload';
 import { markFirstJudge } from '../shared/first-judge';
@@ -54,7 +54,9 @@ function renderTheme(t: Theme): void {
     b.classList.toggle('on', on); b.setAttribute('aria-checked', String(on));
   }
 }
-void initTheme().then(renderTheme);
+// Framed on the Pro account page, the page's own light or dark choice instead (options/framed.ts).
+if (framed) applyTheme(framedTheme());
+else void initTheme().then(renderTheme);
 // Another page (a second options tab, the setup window) may change it: keep the control in step.
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === 'local' && changes.theme) renderTheme(normalizeTheme(changes.theme.newValue));
