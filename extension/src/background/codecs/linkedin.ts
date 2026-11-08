@@ -19,6 +19,9 @@ const LI_READ_EXACT = new Set([
   'com.linkedin.sdui.requests.feed.actorPreviewCard',             // a member's preview card in the feed, sent as the feed loads
   'com.linkedin.sdui.requests.feed.orgPreviewCard',               // a company's preview card, sent when the pointer rests on its name
   'com.linkedin.sdui.jobseeker.requests.jobSearchBoxLegoRequest', // the Jobs page's search box, loaded as the page opens
+  'com.linkedin.sdui.requests.comments.deferredCommentBox',       // a post's comment input, loaded when Like or the comment icon opens its comments
+  'com.linkedin.sdui.pages.messagePage',                          // a company page's message box, opened by its Message button (mailbox and page ids only; Send is a separate write)
+  'com.linkedin.sdui.requests.profile.interopShowToast',          // LinkedIn's own toast, rendered by the server from its text ("There was an issue sending your message")
 ]);
 function linkedinRsc(body: string): string {
   let j: unknown;
@@ -92,9 +95,13 @@ function messagingOp(path: string, action: string | null, o: Obj): string {
   return 'unknown';
 }
 
+/** LinkedIn resends a refused message twice, 4 and 8 seconds apart, as it was but for this flag (false, then true). */
+const RESEND_FLAG = /"dedupeByClientGeneratedToken":(true|false)/;
+
 export const linkedinMessaging: Codec = {
   id: 'linkedin-messaging',
   writePrefixes: ['li:msg:w'],
+  resend: (body) => body.replace(RESEND_FLAG, '"dedupeByClientGeneratedToken":-'),
   matches: (host, template) => host === 'www.linkedin.com' && template.startsWith(LI_MSG),
   decode: (body, { template, query }) => {
     let j: unknown;

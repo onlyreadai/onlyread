@@ -9,4 +9,8 @@ export interface Codec {
   /** The shape for a body, with the request's path template and query for an endpoint that names its operation there;
    *  anything the codec cannot classify must come back as a write (`…:w[unknown]`). */
   decode: (body: string, at: { template: string; query: URLSearchParams }) => string;
+  /** The body with what only marks a resend taken out, so the site's automatic resend of a refused request counts as
+   *  the same change (activity.ts, the in-page notice). Only for a field the site flips on a resend and nothing else;
+   *  without it, a resend is the same change only when its body is byte-for-byte the same. */
+  resend?: (body: string) => string;
 }

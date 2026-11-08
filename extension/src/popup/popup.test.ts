@@ -29,6 +29,7 @@ beforeAll(async () => {
   document.body.innerHTML = html.slice(html.indexOf('<body>') + 6, html.indexOf('</body>')).replace(/<script[^>]*><\/script>/, '');
   vi.stubGlobal('chrome', {
     runtime: {
+      id: 'onlyread',
       connect: () => ({}),
       openOptionsPage: () => {},
       getURL: (p: string) => `chrome-extension://id${p}`,

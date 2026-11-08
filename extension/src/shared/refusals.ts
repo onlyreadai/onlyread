@@ -50,6 +50,15 @@ function whatsappName(shape: string): string | undefined {
   return undefined;
 }
 
+/** Names one request by its method, address and body, so a site resending the same refused request (LinkedIn resends a
+ *  message twice, 4 and 8 seconds apart) counts once: in the Activity list (background/activity.ts) and the in-page
+ *  notice (content/actions.ts). A short hash, so the notice is never sent the address or the body. */
+export function retryKey(method: string, url: string, body = ''): string {
+  let h = 0x811c9dc5;
+  for (const ch of `${method} ${url}\n${body}`) h = Math.imul(h ^ ch.charCodeAt(0), 0x01000193) >>> 0;
+  return h.toString(16);
+}
+
 /** Why a request could not be checked, when that is the only reason it was stopped: the judge failed or timed out,
  *  or OnlyRead Pro could not answer (signed out, inactive, used up, unreachable). Undefined for a real refusal. */
 export type CheckFailure = 'pro-signed-out' | 'pro-inactive' | 'pro-credits' | 'pro-limit' | 'pro-unreachable' | 'judge-timeout' | 'judge-error';

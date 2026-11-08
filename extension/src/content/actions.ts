@@ -13,6 +13,7 @@ import { installAgentSetup } from './agent-setup';
 import { installAccountFrames } from './account-frames';
 import { installDemoCoach } from './demo-coach';
 import { setNoticeRoot } from './notice-root';
+import { findToast, holePath } from './site-toast';
 
 const NAME_MAX = 80;
 
@@ -287,7 +288,10 @@ li { color: var(--ink); }
 .acts button.primary { background: var(--accent); border-color: transparent; color: #fff; }
 .acts button.primary:hover { filter: brightness(1.07); }
 .acts button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-@media (prefers-reduced-motion: reduce) { .box { animation: none; } .acts button { transition: none; } }
+/* Framing a site's toast (site-toast.ts): the notice grows around it, smoothly. */
+.box { transition: left .45s cubic-bezier(.2,.9,.25,1.1), bottom .45s cubic-bezier(.2,.9,.25,1.1),
+  min-width .45s cubic-bezier(.2,.9,.25,1.1), padding-bottom .45s cubic-bezier(.2,.9,.25,1.1); }
+@media (prefers-reduced-motion: reduce) { .box { animation: none; transition: none; } .acts button { transition: none; } }
 `;
 const LOCK_SVG = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>';
 
@@ -308,11 +312,16 @@ function pageIsDark(): boolean {
   return false; // no background anywhere: the canvas is white
 }
 function hideNotice(): void {
-  if (noticeHost) noticeHost.style.display = 'none';
+  unframeToast();
+  if (noticeHost) {
+    noticeHost.style.display = 'none';
+    try { if (noticeHost.matches(':popover-open')) noticeHost.hidePopover(); } catch { /* no Popover API */ }
+  }
   noticePinned = false;
   blocked.clear();
   checks.clear();
   explains.clear();
+  counted.clear();
 }
 function scheduleHide(ms: number): void {
   if (noticeTimer) clearTimeout(noticeTimer);
@@ -356,9 +365,91 @@ function noticeParts(): NoticeParts {
   box.append(noticeIcon(), body);
   root.append(style, box);
   noticeHost.style.display = 'none';
+  noticeHost.setAttribute('popover', 'manual');
   document.documentElement.appendChild(noticeHost);
+  // The page opening a dialog or popover after the notice: the notice goes back on top of it. Closing the modal the
+  // notice sits in: the notice moves back out to the page, or it would close with it.
+  const restack = (e: Event) => {
+    if (e.target === noticeHost || noticeHost?.style.display !== 'block') return;
+    const closing = e.type === 'close' || (e as ToggleEvent).newState === 'closed';
+    if (!closing || (e.target instanceof Node && e.target.contains(noticeHost))) raiseNotice();
+  };
+  document.addEventListener('toggle', restack, true);
+  document.addEventListener('close', restack, true);
   parts = p;
   return p;
+}
+
+// ---- A site's own toast where the notice shows (LinkedIn's "Message send failed."): the notice grows around it and
+// leaves a window over it, so the page's words show inside OnlyRead's frame instead of under it (site-toast.ts).
+/** Room around the toast inside the frame. */
+const TOAST_PAD = 10;
+let toastSearch: ReturnType<typeof setInterval> | undefined;
+let toastFrame = 0;
+let framedToast: HTMLElement | null = null;
+const isOurs = (el: Element) => Boolean(el.closest('[data-onlyread]'));
+
+function followToast(): void {
+  if (toastSearch) return;
+  const look = () => {
+    const box = parts?.box;
+    if (!box || noticeHost?.style.display !== 'block') return;
+    const toast = findToast(box.getBoundingClientRect(), isOurs);
+    if (toast === framedToast) return;
+    framedToast = toast;
+    if (toast) frameToast(); else unframeBox();
+  };
+  look();
+  toastSearch = setInterval(look, 250);
+}
+
+/** Sizes the notice around the framed toast and cuts its window, every frame while it shows (the toast slides in,
+ *  the notice grows). */
+function frameToast(): void {
+  cancelAnimationFrame(toastFrame);
+  const step = () => {
+    const box = parts?.box;
+    const toast = framedToast;
+    if (!box || !toast?.isConnected) { framedToast = null; unframeBox(); return; }
+    const t = toast.getBoundingClientRect();
+    box.style.left = `${Math.max(4, t.left - TOAST_PAD)}px`;
+    box.style.bottom = `${Math.max(4, window.innerHeight - t.bottom - TOAST_PAD)}px`;
+    box.style.minWidth = `${t.width + 2 * TOAST_PAD}px`;
+    box.style.paddingBottom = `${t.height + 2 * TOAST_PAD}px`;
+    const b = box.getBoundingClientRect();
+    const radius = Number.parseFloat(getComputedStyle(toast).borderTopLeftRadius) || 8;
+    box.style.clipPath = holePath(b.width, b.height, { left: t.left - b.left, top: t.top - b.top, width: t.width, height: t.height }, radius);
+    toastFrame = requestAnimationFrame(step);
+  };
+  step();
+}
+
+function unframeBox(): void {
+  cancelAnimationFrame(toastFrame);
+  const box = parts?.box;
+  if (!box) return;
+  for (const k of ['left', 'bottom', 'minWidth', 'paddingBottom', 'clipPath'] as const) box.style[k] = '';
+}
+
+function unframeToast(): void {
+  if (toastSearch) clearInterval(toastSearch);
+  toastSearch = undefined;
+  framedToast = null;
+  unframeBox();
+}
+
+/** Puts the notice above everything the page shows: in the browser's top layer, newest there, as no z-index is above
+ *  a modal dialog and its backdrop (LinkedIn's message box dimmed the notice under it). While a modal dialog is open
+ *  everything outside it is inert, so the notice goes inside it there, or Details and Dismiss could not be pressed. */
+function raiseNotice(): void {
+  const host = noticeHost!;
+  const modal = [...document.querySelectorAll('dialog')].filter((d) => { try { return d.matches(':modal'); } catch { return false; } }).pop();
+  const parent = modal ?? document.documentElement;
+  if (host.parentNode !== parent) parent.appendChild(host);
+  try {
+    if (host.matches(':popover-open')) host.hidePopover();
+    host.showPopover();
+  } catch { /* no Popover API: the z-index still puts it over the page */ }
 }
 
 /** `realOnly`: the click must be real input, so a page script cannot press it (Sign in to Pro opens OnlyRead's settings). */
@@ -453,10 +544,12 @@ function showNotice(c: NoticeContent, ms = NOTICE_MS): void {
   p.codes.textContent = (c.codes ?? []).join('\n');
   p.codes.style.whiteSpace = 'pre-wrap';
   renderActs(p, c);
+  raiseNotice();
   if (appearing) {
     noticeHost!.style.display = 'block';
     p.box.style.animation = 'none'; void p.box.offsetWidth; p.box.style.animation = ''; // replay the entrance only on appearing
   }
+  followToast();
   scheduleHide(ms);
 }
 
@@ -468,6 +561,8 @@ const checks = new Map<CheckFailure, number>();
 const explains = new Map<CheckFailure, string>();
 const codes: string[] = [];
 let siteName = '';
+/** The requests the notice counted (background/interception.ts `sig`), so one sent again is not counted twice. */
+const counted = new Set<string>();
 /** The refused requests of this page, newest last (development builds send them: background/interception.ts), kept
  *  past a dismissed notice so the ones from a page's first moments can still be copied. */
 const requests: string[] = [];
@@ -478,8 +573,18 @@ function noteRequest(line: string): void {
   while (requests.length > MAX_REQUESTS) requests.shift();
 }
 
-function noteBlocked(msg: { shape?: string; reason?: string; site?: string; request?: string; explain?: string }): void {
+/** Whether the notice already counted this request: the page sending a refused request again as it was (LinkedIn
+ *  resends a message twice) is the same change. */
+function countedBefore(sig: string | undefined): boolean {
+  if (!sig) return false;
+  if (counted.has(sig)) return true;
+  counted.add(sig);
+  return false;
+}
+
+function noteBlocked(msg: { shape?: string; reason?: string; site?: string; request?: string; explain?: string; sig?: string }): void {
   siteName = msg.site || location.hostname.replace(/^www\./, '');
+  if (countedBefore(msg.sig)) return;
   if (msg.request) noteRequest(`${msg.request} · ${msg.shape ?? ''} · ${msg.reason ?? ''}`);
   if (blocked.size === 0 && checks.size === 0) codes.length = 0;
   codes.push(`${msg.shape ?? ''} · ${msg.reason ?? ''}`);
@@ -490,7 +595,11 @@ function noteBlocked(msg: { shape?: string; reason?: string; site?: string; requ
     if (msg.explain) explains.set(failure, msg.explain);
     return;
   }
-  const text = stoppedLine(msg.shape, siteName);
+  countLine(stoppedLine(msg.shape, siteName));
+}
+
+/** One more of a kind of change: the newest kind last, the newest three kinds kept. */
+function countLine(text: string): void {
   const prev = blocked.get(text);
   blocked.delete(text); // re-insert so the newest kind is last
   blocked.set(text, { text, count: (prev?.count ?? 0) + 1 });
@@ -498,7 +607,7 @@ function noteBlocked(msg: { shape?: string; reason?: string; site?: string; requ
 }
 
 if (window.top === window) {
-  chrome.runtime.onMessage.addListener((msg: { type?: string; shape?: string; reason?: string; path?: string; site?: string; request?: string; explain?: string }) => {
+  chrome.runtime.onMessage.addListener((msg: { type?: string; shape?: string; reason?: string; path?: string; site?: string; request?: string; explain?: string; sig?: string }) => {
     if (msg?.type !== 'onlyread:blocked') return;
     noteBlocked(msg);
     const fix = [...checks.keys()].map(checkFailureAction).find(Boolean);

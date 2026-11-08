@@ -352,6 +352,8 @@ export interface AuditEntry {
   contentType?: string;
   bodyShape?: string;
   bodyPreview?: string;
+  /** Names the change this request makes (refusals.ts retryKey): the same for the site resending it. Refusals only. */
+  retryKey?: string;
   lastUiActions?: UiAction[];
 }
 
@@ -629,7 +631,7 @@ export type Message =
   /** background → content script: a request from this tab was refused in enforce mode. `request` (method and address)
    *  only in development builds, for the notice's Copy requests. `explain`: OnlyRead Pro's own words for refusing to
    *  check it (the plan), said in place of the notice's own. */
-  | { type: 'onlyread:blocked'; shape: string; reason: string; path: string; site?: string; request?: string; explain?: string }
+  | { type: 'onlyread:blocked'; shape: string; reason: string; path: string; site?: string; request?: string; explain?: string; sig?: string }
   /** agent harness → background: an agent session started (attach) or ended (detach). Only acts under attachWhen='agent-session'. */
   | { type: 'session:set'; active: boolean }
   /** options page → background: patch the guard controls (enabled / mode / attachWhen) atomically. */

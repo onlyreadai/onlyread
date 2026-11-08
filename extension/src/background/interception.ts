@@ -16,6 +16,9 @@ import { closing, unguarded } from './guard';
 import { S, attachmentOn, hostOf, system } from './state';
 import { devBuild } from './policy';
 import { proRefusalText } from './pro-refusal';
+import { retryKey } from '../shared/refusals';
+import { resendBody } from './codecs/index';
+import { pathTemplate } from './fingerprint';
 import { demoRefusal, foldsIntoDemo } from './demo';
 
 // Recovery after a refused mutation (policy.onRefusedMutation). Deps are the real chrome calls;
@@ -45,11 +48,18 @@ const devRequest = (method: string, url: string) => (devBuild() ? `${method} ${u
 /** A closed tab: its pending recovery is cancelled (it would reload a tab that is gone) and its history forgotten. */
 export function forgetRecovery(tabId: number): void { recovery.cancel(tabId); }
 
+/** Names the change a refused request makes: its method, address and body, with what only marks a site's resend of it
+ *  taken out (Codec.resend), so the resend counts as the same change. */
+function changeKey(rec: RequestRecord): string {
+  const body = rec.bodyFull ?? rec.bodyPreview ?? '';
+  return retryKey(rec.method, rec.url, body && resendBody(rec.host, pathTemplate(rec.path), body));
+}
+
 /** A refusal enforced in a tab: the in-page notice, recovery of the app's queue, and the first-run demo's check. */
-function tellTab(rec: RequestRecord, d: Decision, policy: Policy): void {
+function tellTab(rec: RequestRecord, d: Decision, policy: Policy, key: string): void {
   // In-page notice so a person testing (or an agent reading the page) can tell a policy refusal from a network error;
   // not for the follow-ups of the demo's own write, which its notice already shows (demo.ts foldsIntoDemo).
-  if (!foldsIntoDemo(rec.host)) chrome.tabs.sendMessage(rec.tabId, { type: 'onlyread:blocked', shape: rec.bodyShape, reason: d.reason, path: rec.path, site: guardedSiteName(policy, rec.host), request: devRequest(rec.method, rec.url), explain: d.reason.startsWith('judge-error:cloud:') ? proRefusalText() : undefined } satisfies Message).catch(() => { /* no content script in this frame */ });
+  if (!foldsIntoDemo(rec.host)) chrome.tabs.sendMessage(rec.tabId, { type: 'onlyread:blocked', shape: rec.bodyShape, reason: d.reason, path: rec.path, site: guardedSiteName(policy, rec.host), request: devRequest(rec.method, rec.url), explain: d.reason.startsWith('judge-error:cloud:') ? proRefusalText() : undefined, sig: key } satisfies Message).catch(() => { /* no content script in this frame */ });
   // Recover the tab if configured: a refused write otherwise wedges the app's mutation queue.
   recovery.schedule(rec.tabId, recoveryFor(policy, true));
   void demoRefusal(rec.tabId, rec.host, { url: rec.url, shape: rec.bodyShape, body: rec.bodyFull ?? rec.bodyPreview }, d.reason); // the first-run demo's write (demo.ts)
@@ -73,10 +83,11 @@ export async function onPaused(rec: RequestRecord): Promise<dbg.Disposition> {
     pWrite: d.pWrite, latencyMs: d.latencyMs, judgeModel: d.judgeModel, judgeReason: d.judgeReason,
     fingerprint: rec.fingerprint, requestId: rec.requestId,
     contentType: rec.contentType, bodyShape: rec.bodyShape, bodyPreview: rec.bodyPreview,
+    retryKey: d.verdict === 'block' ? changeKey(rec) : undefined,
     lastUiActions: rec.lastUiActions.length ? rec.lastUiActions : undefined,
   };
   void audit.record(entry);
-  if (enforced && rec.tabId >= 0 && !starting) tellTab(rec, d, policy);
+  if (enforced && rec.tabId >= 0 && !starting) tellTab(rec, d, policy, entry.retryKey ?? changeKey(rec));
   // The dev sink (measurement only) also gets the full body when the preview was truncated, so opaque
   // payloads (Google's f.req) can be decoded offline. The persisted audit keeps the 2 KB preview.
   sink.send('decision', rec.bodyFull ? { ...entry, bodyFull: rec.bodyFull } : entry);
@@ -165,10 +176,27 @@ export function onWebRequestError(d: WebRequestError): void {
   const entry: AuditEntry = {
     kind: 'decision', ts: Date.now(), tabId: d.tabId, method: d.method, url: d.url, resourceType: d.type,
     verdict: 'block', source: 'dnr', reason, mode: policy.mode, enforced: true,
-    requestId: d.requestId,
+    requestId: d.requestId, retryKey: retryKey(d.method, d.url),
   };
   void audit.record(entry);
   sink.send('decision', entry);
+  // The page is told as it is for the debugger's refusals: a PUT, PATCH or DELETE (LinkedIn's settings save its
+  // language by PUT) never reaches the debugger, and without the notice the page's own error looked like a network
+  // fault. Only the rules that refuse a write by what it is; the cover rules (a tab the debugger does not hold yet, a
+  // closing tab, fail-closed) refuse reads too, and a closed live connection is reopened every second or two.
+  const host = hostOf(d.url);
+  if (dnrNotice(d.tabId, reason) && !foldsIntoDemo(host)) {
+    chrome.tabs.sendMessage(d.tabId, { type: 'onlyread:blocked', shape: '', reason, path: pathOf(d.url), site: guardedSiteName(policy, host), request: devRequest(d.method, d.url), sig: entry.retryKey } satisfies Message).catch(() => { /* no content script in this frame */ });
+    recovery.schedule(d.tabId, recoveryFor(policy, true));
+  }
+}
+
+/** Whether a DNR-layer refusal gets the in-page notice: a tab's write refused by what it is (dnrReasonFor). */
+export const dnrNotice = (tabId: number, reason: string): boolean =>
+  tabId >= 0 && (reason === 'mutating-method' || reason === 'post-navigation' || reason.startsWith('blocked-get-path'));
+
+function pathOf(url: string): string {
+  try { return new URL(url).pathname; } catch { return ''; }
 }
 
 export function onDetach(tabId: number, reason: string): void {

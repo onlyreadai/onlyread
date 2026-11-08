@@ -3,6 +3,7 @@ import type { ActivityItem, ActivitySummary, CloudStatus, Message, SettingsLock,
 import { agreeToJudge } from '../shared/consent-ui';
 import { accountActive, accountStatusText, cloudProblem, cloudUsage, proManaged, usagePercent } from '../shared/cloud-ui';
 import { $, faviconImg, iconImg, installIconFallbacks, lockedBy, send } from '../popup/ui';
+import { extensionGone } from '../shared/messaging';
 import { initTheme, normalizeTheme, setTheme, type Theme } from '../shared/theme';
 import { anthropicLine, mountByokForm } from '../shared/byok-form';
 import { exclusionLine, type OverviewButton, overviewAction, overviewFacts, overviewHeading, setupLine, siteSummary } from '../shared/status-text';
@@ -895,4 +896,7 @@ void refresh().then(async () => {
   showSignInResult();
 });
 void send({ type: 'sites:discover' });
-setInterval(() => void refresh(), 3000);
+const refreshing = setInterval(() => {
+  if (extensionGone()) { clearInterval(refreshing); return; } // reloaded or updated: this page has no extension behind it
+  void refresh();
+}, 3000);

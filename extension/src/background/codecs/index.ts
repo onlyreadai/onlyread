@@ -19,6 +19,12 @@ export const CODECS: readonly Codec[] = [gcal, gtasks, gmail, linkedin, linkedin
 /** Every codec's write prefix: blocked by default, whatever the stored policy says. */
 export const CODEC_WRITE_PREFIXES: readonly string[] = CODECS.flatMap((c) => c.writePrefixes);
 
+/** The body as it identifies a change, with what only marks a resend taken out (Codec.resend). */
+export function resendBody(host: string, template: string, body: string): string {
+  for (const c of CODECS) if (c.matches(host, template)) return c.resend ? c.resend(body) : body;
+  return body;
+}
+
 export function decodeShape(host: string, template: string, body: string | undefined, query = new URLSearchParams()): string | undefined {
   if (!body) return undefined;
   for (const c of CODECS) if (c.matches(host, template)) return c.decode(body, { template, query });
