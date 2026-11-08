@@ -5,10 +5,15 @@
 #   zips replaced. Publishing the draft stays a person's step.
 # - Running it by hand (Actions → release → Run workflow) does the same checks and build and keeps the zips
 #   as a workflow artifact, without touching any release.
+# - Every push to main does the same checks and build and puts the zips on the `main-latest` pre-release (latest job),
+#   replacing the previous ones: the store release of main's current commit, to load unpacked with the store's
+#   extension ID. It never reaches the store (the store job runs for `v*` tags only) and never becomes the
+#   repository's Latest release.
 name: release
 on:
   push:
     tags: ['v*']
+    branches: [main]
   workflow_dispatch:
 permissions:
   contents: write
@@ -76,6 +81,61 @@ jobs:
             gh release create "$GITHUB_REF_NAME" bundles/*.zip bundles/SHA256SUMS.txt --draft --verify-tag \
               --title "OnlyRead ${GITHUB_REF_NAME#v}" --generate-notes
           fi
+
+  latest:
+    # main's build on one rolling pre-release, under version-less names so its download links never change:
+    #   https://github.com/onlyreadai/onlyread/releases/download/main-latest/onlyread-latest.zip          (load unpacked)
+    #   https://github.com/onlyreadai/onlyread/releases/download/main-latest/onlyread-latest-webstore.zip (the store zip)
+    # The load-unpacked zip carries the store's public `key` back (the manifest's, which bundle.py drops when staging), so
+    # it installs with the store's extension ID, foajfkjhcigaillohhdbfadobkhpddij; the webstore zip is left exactly as
+    # built. Being the same ID, it can't be loaded next to the store install or the working copy.
+    # The release is recreated on the new commit each time (its tag moves with it), so for a few seconds it is missing.
+    if: github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: extension/manifest.json
+          sparse-checkout-cone-mode: false
+      - uses: actions/download-artifact@v8
+        with:
+          name: onlyread-bundles
+          path: bundles
+      - name: Give the load-unpacked zip the store's key
+        run: |
+          key=$(jq -r '.key // empty' extension/manifest.json)
+          test -n "$key" || { echo "::error::extension/manifest.json has no key"; exit 1; }
+          id=$(echo "$key" | base64 -d | sha256sum | head -c 32 | tr 0-9a-f a-p)
+          test "$id" = foajfkjhcigaillohhdbfadobkhpddij || { echo "::error::the manifest's key gives $id, not the store's ID"; exit 1; }
+          zip=$(ls bundles/onlyread-[0-9]*.zip | grep -v webstore)
+          work=$(mktemp -d)
+          unzip -q "$zip" -d "$work"
+          jq --arg key "$key" '. + {key: $key}' "$work/onlyread/manifest.json" > "$work/manifest.json"
+          mv "$work/manifest.json" "$work/onlyread/manifest.json"
+          rm "$zip" && (cd "$work" && zip -qrXD - onlyread) > "$zip"
+          echo "load-unpacked zip: extension ID $id"
+      - name: Replace the main-latest pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          cd bundles
+          mv onlyread-*-webstore.zip onlyread-latest-webstore.zip
+          mv onlyread-[0-9]*.zip onlyread-latest.zip
+          sha256sum *.zip > SHA256SUMS.txt && cat SHA256SUMS.txt
+          version=$(unzip -p onlyread-latest-webstore.zip manifest.json | jq -r .version)
+          gh release delete main-latest --cleanup-tag --yes || true
+          gh release create main-latest onlyread-latest.zip onlyread-latest-webstore.zip SHA256SUMS.txt \
+            --prerelease --latest=false --target "$GITHUB_SHA" \
+            --title "main (unreleased, ${GITHUB_SHA::7})" \
+            --notes "The store release of main at ${GITHUB_SHA} (version ${version}), built and checked exactly as a \`v*\` release is. It is not on the Chrome Web Store; use the [latest release](https://github.com/${GH_REPO}/releases/latest) for that.
+
+          To load it: unzip \`onlyread-latest.zip\`, then on chrome://extensions turn on Developer mode, Load unpacked, and choose the \`onlyread\` folder. It has the store's extension ID, so remove the store install first. To update: unzip the new one over it and press reload on the extension's card.
+
+          \`onlyread-latest-webstore.zip\` is the store zip itself, unchanged; \`onlyread-latest.zip\` is the same files with the store's public key in the manifest, which gives it the store's ID."
 
   store:
     # A release tag's store zip goes up to the Chrome Web Store as the item's new draft, and stops there: submitting it
