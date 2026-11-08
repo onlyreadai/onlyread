@@ -42,8 +42,11 @@ if (framed) enterFramed(framed);
 
 installIconFallbacks();
 mountReport();
-// The demo again, on any of its sites: the setup window's choice of site (background/messages.ts openSetupWindow).
-$('demo-again').addEventListener('click', () => void send({ type: 'setup:open', step: 'demo' }));
+// The demo again, on any of its sites: the setup window's choice of site (background/messages.ts openSetupWindow). In
+// the Overview card, and in Pro mode in the "Managed on your Pro account" card, which is all the page shows there.
+for (const b of document.querySelectorAll<HTMLButtonElement>('[data-demo-again]')) {
+  b.addEventListener('click', () => void send({ type: 'setup:open', step: 'demo' }));
+}
 // Appearance: System / Light / Dark, stored once and applied by every extension page.
 function renderTheme(t: Theme): void {
   for (const b of document.querySelectorAll<HTMLButtonElement>('#theme-seg button')) {

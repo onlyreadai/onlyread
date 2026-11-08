@@ -453,6 +453,7 @@
   .card.pro-managed { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; justify-content: space-between; padding: 20px 22px; background: var(--card); }
   .card.pro-managed .text { display: grid; gap: 2px; min-width: 0; }
   .card.pro-managed .text span { color: var(--muted); font-size: 13px; }
+  .card.pro-managed .demo-again { flex-basis: 100%; margin: 0; }
   html.framed body { visibility: hidden; background: transparent; }
   html.framed.framed-ok body { visibility: visible; }
   html.framed .top, html.framed .content-top, html.framed .side, html.framed .legal, html.framed .content > section:not(.framed-target) { display: none; }
@@ -521,6 +522,7 @@
           <div class="card pro-managed">
             <div class="text"><b>Managed on your Pro account</b><span>Sites, activity and protection for this browser.</span></div>
             <button id="pro-managed-open" class="btn primary" type="button">Open your account page</button>
+            <p class="demo-again">See OnlyRead stop a change on a real site. <button type="button" class="link" data-demo-again>Try the demo</button></p>
           </div>
         </section>
 
@@ -539,7 +541,7 @@
               <div class="tile"><div class="k">Writes refused today</div><div class="v"><span id="t-refused">0</span> <small id="t-seen"></small></div></div>
               <div class="tile"><div class="k">Guarded sites</div><div class="v"><span id="t-sites">0</span></div><div class="sub" id="t-account"></div></div>
             </div>
-            <p class="demo-again">See OnlyRead stop a change on a real site. <button type="button" class="link" id="demo-again">Try the demo</button></p>
+            <p class="demo-again">See OnlyRead stop a change on a real site. <button type="button" class="link" id="demo-again" data-demo-again>Try the demo</button></p>
           </div>
         </section>
 

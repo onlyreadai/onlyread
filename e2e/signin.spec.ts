@@ -102,6 +102,14 @@ test('signed in to Pro, the settings page sends to the account page; with Pro ou
   await options.locator('#pro-managed-open').click();
   await (await account).close();
 
+  // The demo again: in Pro mode the Overview card is gone, so the Pro card carries its "Try the demo".
+  for (const p of h.ctx.pages().filter((x) => x.url().startsWith(extPage('setup.html')))) await p.close();
+  await options.locator('#pro-managed [data-demo-again]').click();
+  await expect.poll(() => h.ctx.pages().some((p) => p.url().endsWith('setup.html#demo')), { timeout: 10_000 }).toBe(true);
+  const demo = h.ctx.pages().find((p) => p.url().endsWith('setup.html#demo'))!;
+  await expect(demo.locator('#step-demo')).toBeVisible();
+  await demo.close();
+
   // Pro out of reach: the whole page, the account's sites as last synced.
   await mock({ down: true });
   await options.evaluate(() => chrome.runtime.sendMessage({ type: 'cloud:status', refresh: true }));
