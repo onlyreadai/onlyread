@@ -458,6 +458,9 @@
   html.framed.framed-ok body { visibility: visible; }
   html.framed .top, html.framed .content-top, html.framed .side, html.framed .legal, html.framed .content > section:not(.framed-target) { display: none; }
   html.framed .page { max-width: none; padding: 2px; }
+  /* Framed, a card's shadow would reach past the frame's edge and be cut there, a thin band along the sides and the
+     bottom: the account page around the frame gives the depth instead. */
+  html.framed .card { box-shadow: none; }
   html.framed .shell { display: block; }
   html.framed .framed-target > header { display: none; }
   html.framed dialog { margin-top: 24px; }
