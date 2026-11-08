@@ -193,6 +193,19 @@ describe('the notice for refused writes', () => {
     expect(n.lines).toHaveLength(1);
     expect(n.lines[0]).toContain('×2');
   });
+  // LinkedIn resends a refused message twice as it was: one message, so no ×3; a different one in the same notice is ×2.
+  it('counts a request the page sends again as it was once', () => {
+    dismiss();
+    const send = (sig: string) => push({ type: 'onlyread:blocked', shape: 'li:msg:w[send]', reason: 'decoded-write', path: '/m', site: 'LinkedIn', sig });
+    send('a1'); send('a1'); send('a1');
+    expect(notice().lines).toEqual(['Stopped a change: Send.']);
+    send('b2');
+    expect(notice().lines[0]).toContain('×2');
+    dismiss();
+    send('a1'); // a new notice counts afresh
+    expect(notice().lines).toEqual(['Stopped a change: Send.']);
+    dismiss();
+  });
   it('names a change it cannot name by its site, and shows at most three kinds, dropping the oldest', () => {
     push({ type: 'onlyread:blocked', shape: 'json:title', reason: 'p>block', path: '/api/v2/items/123', site: 'Facebook' });
     expect(notice().lines.at(-1)).toBe('Stopped a change on Facebook.');
@@ -277,6 +290,62 @@ describe('the notice for refused writes', () => {
     expect(notice().codes?.textContent).toContain('queryId=x');
     vi.stubGlobal('navigator', real);
     dismiss();
+  });
+  // The search for the page's own toast costs hit tests: it runs for a few seconds after a refusal, not for as long as
+  // the notice shows.
+  it('looks for the page\'s toast only for a few seconds after a refusal', () => {
+    vi.useFakeTimers();
+    const doc = document as unknown as { elementsFromPoint: () => Element[] };
+    const was = doc.elementsFromPoint;
+    let looks = 0;
+    doc.elementsFromPoint = () => { looks++; return []; };
+    try {
+      dismiss();
+      push({ type: 'onlyread:blocked', shape: 'li:msg:w[send]', reason: 'decoded-write', path: '/m', site: 'LinkedIn', sig: 'w1' });
+      vi.advanceTimersByTime(2_000);
+      const during = looks;
+      expect(during).toBeGreaterThan(0);
+      vi.advanceTimersByTime(1_500); // past the window, the notice still showing
+      const after = looks;
+      vi.advanceTimersByTime(2_000);
+      expect(notice().visible).toBe(true);
+      expect(looks).toBe(after);
+    } finally {
+      doc.elementsFromPoint = was;
+      dismiss();
+      vi.useRealTimers();
+    }
+  });
+  // No z-index is above a modal dialog and its backdrop (LinkedIn's message box dimmed the notice under it): the notice
+  // goes to the top layer as the newest there, inside the modal while one is open (everything outside it is inert).
+  it('shows above a modal dialog, inside it, and moves back out to the page when the dialog closes', () => {
+    const host = () => document.querySelector<HTMLElement>('[data-onlyread=notice]')!;
+    const shown: (Element | null)[] = [];
+    const proto = HTMLElement.prototype as unknown as Record<string, unknown>;
+    const had = { show: proto.showPopover, hide: proto.hidePopover };
+    proto.showPopover = function (this: HTMLElement) { shown.push(this.parentElement); };
+    proto.hidePopover = () => {};
+    const dialog = document.createElement('dialog');
+    const matches = dialog.matches.bind(dialog);
+    let modal = true;
+    Object.defineProperty(dialog, 'matches', { value: (s: string) => (s === ':modal' && modal) || matches(s) });
+    document.body.append(dialog);
+    try {
+      push({ type: 'onlyread:blocked', shape: 'li:rsc:w[messenger.batchCreateMessages]', reason: 'decoded-write', path: '/a', site: 'LinkedIn' });
+      expect(host().getAttribute('popover')).toBe('manual');
+      expect(host().parentElement).toBe(dialog);
+      expect(shown).toEqual([dialog]);
+      // The page closes its dialog while the notice shows: the notice moves out to the page, still showing.
+      modal = false;
+      dialog.dispatchEvent(new Event('close'));
+      expect(host().parentElement).toBe(document.documentElement);
+      expect(host().style.display).toBe('block');
+      expect(shown).toEqual([dialog, document.documentElement]);
+      dialog.remove();
+    } finally {
+      proto.showPopover = had.show; proto.hidePopover = had.hide;
+      dismiss();
+    }
   });
 });
 

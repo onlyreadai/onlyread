@@ -216,6 +216,96 @@
   "expected": "POST www.linkedin.com/flagship-web/rsc-action/actions/server-request li:rsc:r"
  },
  {
+  "name": "linkedin rsc read deferredCommentBox",
+  "method": "POST",
+  "url": "https://www.linkedin.com/flagship-web/rsc-action/actions/server-request",
+  "contentType": "application/json",
+  "hasBody": true,
+  "body": "{\"requestId\": \"com.linkedin.sdui.requests.comments.deferredCommentBox\", \"serverRequest\": {\"requestId\": \"com.linkedin.sdui.requests.comments.deferredCommentBox\", \"requestedArguments\": {\"$type\": \"proto.sdui.actions.requests.RequestedArguments\", \"payload\": {}}}, \"states\": []}",
+  "expected": "POST www.linkedin.com/flagship-web/rsc-action/actions/server-request li:rsc:r"
+ },
+ {
+  "name": "linkedin rsc write: a name that only starts like deferredCommentBox",
+  "method": "POST",
+  "url": "https://www.linkedin.com/flagship-web/rsc-action/actions/server-request",
+  "contentType": "application/json",
+  "hasBody": true,
+  "body": "{\"requestId\": \"com.linkedin.sdui.requests.comments.deferredCommentBoxSubmit\", \"serverRequest\": {\"requestId\": \"com.linkedin.sdui.requests.comments.deferredCommentBoxSubmit\", \"requestedArguments\": {\"$type\": \"proto.sdui.actions.requests.RequestedArguments\", \"payload\": {}}}, \"states\": []}",
+  "expected": "POST www.linkedin.com/flagship-web/rsc-action/actions/server-request li:rsc:w[comments.deferredCommentBoxSubmit]"
+ },
+ {
+  "name": "linkedin rsc read messagePage (a company page's message box)",
+  "method": "POST",
+  "url": "https://www.linkedin.com/flagship-web/rsc-action/actions/server-request",
+  "contentType": "application/json",
+  "hasBody": true,
+  "body": "{\"requestId\": \"com.linkedin.sdui.pages.messagePage\", \"serverRequest\": {\"requestId\": \"com.linkedin.sdui.pages.messagePage\", \"requestedArguments\": {\"$type\": \"proto.sdui.actions.requests.RequestedArguments\", \"requestedStateKeys\": [], \"payload\": {\"pageMailboxId\": \"100000001\", \"organizationId\": \"100000002\"}}}, \"states\": []}",
+  "expected": "POST www.linkedin.com/flagship-web/rsc-action/actions/server-request li:rsc:r"
+ },
+ {
+  "name": "linkedin rsc write: a name that only starts like messagePage",
+  "method": "POST",
+  "url": "https://www.linkedin.com/flagship-web/rsc-action/actions/server-request",
+  "contentType": "application/json",
+  "hasBody": true,
+  "body": "{\"requestId\": \"com.linkedin.sdui.pages.messagePageSend\", \"serverRequest\": {\"requestId\": \"com.linkedin.sdui.pages.messagePageSend\", \"requestedArguments\": {\"$type\": \"proto.sdui.actions.requests.RequestedArguments\", \"requestedStateKeys\": [], \"payload\": {\"pageMailboxId\": \"100000001\", \"organizationId\": \"100000002\"}}}, \"states\": []}",
+  "expected": "POST www.linkedin.com/flagship-web/rsc-action/actions/server-request li:rsc:w[pages.messagePageSend]"
+ },
+ {
+  "name": "linkedin rsc read interopShowToast (LinkedIn's own error toast, as it sends it)",
+  "method": "POST",
+  "url": "https://www.linkedin.com/flagship-web/rsc-action/actions/server-request",
+  "contentType": "application/json",
+  "hasBody": true,
+  "body": "{\"requestId\": \"com.linkedin.sdui.requests.profile.interopShowToast\", \"serverRequest\": {\"requestId\": \"com.linkedin.sdui.requests.profile.interopShowToast\", \"requestedArguments\": {\"$type\": \"proto.sdui.actions.requests.RequestedArguments\", \"payload\": {\"errorToast\": \"There was an issue sending your message, please try again.\"}, \"requestedStateKeys\": []}, \"isStreaming\": false, \"isApfcEnabled\": false, \"rumPageKey\": \"\"}, \"states\": [], \"requestedArguments\": {\"$type\": \"proto.sdui.actions.requests.RequestedArguments\", \"payload\": {\"errorToast\": \"There was an issue sending your message, please try again.\"}, \"requestedStateKeys\": [], \"states\": [], \"screenId\": \"com.linkedin.sdui.flagshipnav.profile.Profile\", \"knownTemplateIds\": []}}",
+  "expected": "POST www.linkedin.com/flagship-web/rsc-action/actions/server-request li:rsc:r"
+ },
+ {
+  "name": "linkedin rsc read interopShowToast (its payload alone)",
+  "method": "POST",
+  "url": "https://www.linkedin.com/flagship-web/rsc-action/actions/server-request",
+  "contentType": "application/json",
+  "hasBody": true,
+  "body": "{\"requestId\": \"com.linkedin.sdui.requests.profile.interopShowToast\", \"serverRequest\": {\"requestId\": \"com.linkedin.sdui.requests.profile.interopShowToast\", \"requestedArguments\": {\"$type\": \"proto.sdui.actions.requests.RequestedArguments\", \"payload\": {\"errorToast\": \"There was an issue sending your message, please try again.\"}, \"requestedStateKeys\": []}, \"isStreaming\": false, \"isApfcEnabled\": false, \"rumPageKey\": \"\"}, \"states\": []}",
+  "expected": "POST www.linkedin.com/flagship-web/rsc-action/actions/server-request li:rsc:r"
+ },
+ {
+  "name": "linkedin rsc write: interopShowToast carrying anything besides the toast's text",
+  "method": "POST",
+  "url": "https://www.linkedin.com/flagship-web/rsc-action/actions/server-request",
+  "contentType": "application/json",
+  "hasBody": true,
+  "body": "{\"requestId\": \"com.linkedin.sdui.requests.profile.interopShowToast\", \"serverRequest\": {\"requestId\": \"com.linkedin.sdui.requests.profile.interopShowToast\", \"requestedArguments\": {\"$type\": \"proto.sdui.actions.requests.RequestedArguments\", \"payload\": {\"errorToast\": \"There was an issue sending your message, please try again.\", \"note\": \"x\"}, \"requestedStateKeys\": []}, \"isStreaming\": false, \"isApfcEnabled\": false, \"rumPageKey\": \"\"}, \"states\": [], \"requestedArguments\": {\"$type\": \"proto.sdui.actions.requests.RequestedArguments\", \"payload\": {\"errorToast\": \"There was an issue sending your message, please try again.\", \"note\": \"x\"}, \"requestedStateKeys\": [], \"states\": [], \"screenId\": \"com.linkedin.sdui.flagshipnav.profile.Profile\", \"knownTemplateIds\": []}}",
+  "expected": "POST www.linkedin.com/flagship-web/rsc-action/actions/server-request li:rsc:w[profile.interopShowToast]"
+ },
+ {
+  "name": "linkedin rsc write: interopShowToast whose text is no string",
+  "method": "POST",
+  "url": "https://www.linkedin.com/flagship-web/rsc-action/actions/server-request",
+  "contentType": "application/json",
+  "hasBody": true,
+  "body": "{\"requestId\": \"com.linkedin.sdui.requests.profile.interopShowToast\", \"serverRequest\": {\"requestId\": \"com.linkedin.sdui.requests.profile.interopShowToast\", \"requestedArguments\": {\"$type\": \"proto.sdui.actions.requests.RequestedArguments\", \"payload\": {\"errorToast\": {\"text\": \"x\"}}, \"requestedStateKeys\": []}, \"isStreaming\": false, \"isApfcEnabled\": false, \"rumPageKey\": \"\"}, \"states\": [], \"requestedArguments\": {\"$type\": \"proto.sdui.actions.requests.RequestedArguments\", \"payload\": {\"errorToast\": {\"text\": \"x\"}}, \"requestedStateKeys\": [], \"states\": [], \"screenId\": \"com.linkedin.sdui.flagshipnav.profile.Profile\", \"knownTemplateIds\": []}}",
+  "expected": "POST www.linkedin.com/flagship-web/rsc-action/actions/server-request li:rsc:w[profile.interopShowToast]"
+ },
+ {
+  "name": "linkedin rsc write: interopShowToast whose text is longer than a toast",
+  "method": "POST",
+  "url": "https://www.linkedin.com/flagship-web/rsc-action/actions/server-request",
+  "contentType": "application/json",
+  "hasBody": true,
+  "body": "{\"requestId\": \"com.linkedin.sdui.requests.profile.interopShowToast\", \"serverRequest\": {\"requestId\": \"com.linkedin.sdui.requests.profile.interopShowToast\", \"requestedArguments\": {\"$type\": \"proto.sdui.actions.requests.RequestedArguments\", \"payload\": {\"errorToast\": \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}, \"requestedStateKeys\": []}, \"isStreaming\": false, \"isApfcEnabled\": false, \"rumPageKey\": \"\"}, \"states\": [], \"requestedArguments\": {\"$type\": \"proto.sdui.actions.requests.RequestedArguments\", \"payload\": {\"errorToast\": \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}, \"requestedStateKeys\": [], \"states\": [], \"screenId\": \"com.linkedin.sdui.flagshipnav.profile.Profile\", \"knownTemplateIds\": []}}",
+  "expected": "POST www.linkedin.com/flagship-web/rsc-action/actions/server-request li:rsc:w[profile.interopShowToast]"
+ },
+ {
+  "name": "linkedin rsc write: interopShowToast with no payload",
+  "method": "POST",
+  "url": "https://www.linkedin.com/flagship-web/rsc-action/actions/server-request",
+  "contentType": "application/json",
+  "hasBody": true,
+  "body": "{\"requestId\": \"com.linkedin.sdui.requests.profile.interopShowToast\", \"serverRequest\": {\"requestId\": \"com.linkedin.sdui.requests.profile.interopShowToast\"}}",
+  "expected": "POST www.linkedin.com/flagship-web/rsc-action/actions/server-request li:rsc:w[profile.interopShowToast]"
+ },
+ {
   "name": "linkedin rsc write: a name that only starts like actorPreviewCard",
   "method": "POST",
   "url": "https://www.linkedin.com/flagship-web/rsc-action/actions/server-request",

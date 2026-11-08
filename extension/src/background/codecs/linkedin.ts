@@ -19,11 +19,35 @@ const LI_READ_EXACT = new Set([
   'com.linkedin.sdui.requests.feed.actorPreviewCard',             // a member's preview card in the feed, sent as the feed loads
   'com.linkedin.sdui.requests.feed.orgPreviewCard',               // a company's preview card, sent when the pointer rests on its name
   'com.linkedin.sdui.jobseeker.requests.jobSearchBoxLegoRequest', // the Jobs page's search box, loaded as the page opens
+  'com.linkedin.sdui.requests.comments.deferredCommentBox',       // a post's comment input, loaded when Like or the comment icon opens its comments
+  'com.linkedin.sdui.pages.messagePage',                          // a company page's message box, opened by its Message button (mailbox and page ids only; Send is a separate write)
 ]);
+
+// LinkedIn's own error toast, rendered by the server from its text ("There was an issue sending your message, please try
+// again."), sent after a refused send. Its body carries free text, so it is a read only in exactly the shape LinkedIn
+// sends: every payload in it holds the toast's text and nothing else, and the text is a toast's length. Refused, the
+// toast never shows, and the page's own reason for the failure is lost.
+const LI_TOAST = 'com.linkedin.sdui.requests.profile.interopShowToast';
+const TOAST_MAX = 300;
+
+function isToastPayload(args: unknown): boolean {
+  if (!args || typeof args !== 'object' || Array.isArray(args)) return false;
+  const p = (args as { payload?: unknown }).payload;
+  if (!p || typeof p !== 'object' || Array.isArray(p)) return false;
+  const keys = Object.keys(p);
+  const text = (p as { errorToast?: unknown }).errorToast;
+  return keys.length === 1 && keys[0] === 'errorToast' && typeof text === 'string' && text.length <= TOAST_MAX;
+}
+
+/** The toast's body as LinkedIn sends it: its payload, and the copy of it some bodies repeat at the top level. */
+function isOwnToast(o: { serverRequest?: unknown; requestedArguments?: unknown }): boolean {
+  const server = o.serverRequest as { requestedArguments?: unknown } | undefined;
+  return isToastPayload(server?.requestedArguments) && (o.requestedArguments === undefined || isToastPayload(o.requestedArguments));
+}
 function linkedinRsc(body: string): string {
   let j: unknown;
   try { j = JSON.parse(body); } catch { return 'li:rsc:w[unparseable]'; }
-  const o = j && typeof j === 'object' && !Array.isArray(j) ? (j as { requestId?: unknown; serverRequest?: { requestId?: unknown } }) : undefined;
+  const o = j && typeof j === 'object' && !Array.isArray(j) ? (j as { requestId?: unknown; serverRequest?: { requestId?: unknown }; requestedArguments?: unknown }) : undefined;
   const rid = o?.requestId;
   if (typeof rid !== 'string' || !rid) return 'li:rsc:w[unknown]';
   // The two ids were identical in every observed body. A body whose inner id differs from the outer one is
@@ -32,6 +56,7 @@ function linkedinRsc(body: string): string {
   if (inner !== undefined && inner !== rid) return 'li:rsc:w[mismatch]';
   const segs = rid.split('.');
   const last = segs[segs.length - 1] ?? rid;
+  if (rid === LI_TOAST && o && isOwnToast(o)) return 'li:rsc:r';
   if (LI_READ_EXACT.has(rid) || LI_READ_VERB.test(last) || LI_READ_SUFFIX.test(last)) return 'li:rsc:r';
   return `li:rsc:w[${segs.slice(-2).join('.')}]`;
 }
@@ -92,9 +117,13 @@ function messagingOp(path: string, action: string | null, o: Obj): string {
   return 'unknown';
 }
 
+/** LinkedIn resends a refused message twice, 4 and 8 seconds apart, as it was but for this flag (false, then true). */
+const RESEND_FLAG = /"dedupeByClientGeneratedToken"\s*:\s*(true|false)/g;
+
 export const linkedinMessaging: Codec = {
   id: 'linkedin-messaging',
   writePrefixes: ['li:msg:w'],
+  resend: (body) => body.replace(RESEND_FLAG, '"dedupeByClientGeneratedToken":-'),
   matches: (host, template) => host === 'www.linkedin.com' && template.startsWith(LI_MSG),
   decode: (body, { template, query }) => {
     let j: unknown;

@@ -63,7 +63,31 @@ describe('onPaused: a request on a guarded tab', () => {
     expect(await onPaused(rec())).toBe('fail');
     expect(h.audit).toHaveLength(1);
     expect(h.audit[0]).toMatchObject({ kind: 'decision', verdict: 'block', enforced: true, mode: 'enforce', reason: 'p>block', fingerprint: 'POST app.example.com/api/items json:title' });
-    expect(sendMessage).toHaveBeenCalledWith(7, { type: 'onlyread:blocked', shape: 'json:title', reason: 'p>block', path: '/api/items', site: 'App', request: 'POST https://app.example.com/api/items' }); // a development build (vitest) names the request
+    expect(sendMessage).toHaveBeenCalledWith(7, { type: 'onlyread:blocked', shape: 'json:title', reason: 'p>block', path: '/api/items', site: 'App', request: 'POST https://app.example.com/api/items', sig: expect.stringMatching(/^[0-9a-f]+$/) }); // a development build (vitest) names the request
+  });
+
+  // The notice counts a request the page sends again as it was once (content/actions.ts): the same request, the same key.
+  it('names the refused request to the notice by a key, the same for a request sent again as it was', async () => {
+    S.policy = policy('enforce'); h.decision = refuse;
+    await onPaused(rec({ requestId: 'r-1' }));
+    await onPaused(rec({ requestId: 'r-2', ts: 9 }));
+    await onPaused(rec({ requestId: 'r-3', bodyPreview: '{"title":"y"}' }));
+    const sigs = (sendMessage.mock.calls as unknown as [number, { sig: string }][]).map(([, m]) => m.sig);
+    expect(sigs[0]).toBe(sigs[1]);
+    expect(sigs[2]).not.toBe(sigs[0]);
+  });
+
+  // LinkedIn resends a refused message as it was but for one flag (false, then true): the same message, the same key.
+  it('names a site\'s resend by the same key when its codec says what only marks the resend', async () => {
+    S.policy = policy('enforce', { customSites: [{ id: 'www.linkedin.com', name: 'LinkedIn', domains: ['www.linkedin.com'], enabled: true }] }); h.decision = refuse;
+    const url = 'https://www.linkedin.com/voyager/api/voyagerMessagingDashMessengerMessages?action=createMessage';
+    const send = (text: string, resent: boolean) => rec({ host: 'www.linkedin.com', url, path: '/voyager/api/voyagerMessagingDashMessengerMessages',
+      bodyPreview: `{"message":{"body":{"text":"${text}"}},"trackingId":"t-${text}","dedupeByClientGeneratedToken":${resent}}`, bodyShape: 'li:msg:w[send]' });
+    await onPaused(send('hi', false));
+    await onPaused(send('hi', true));
+    await onPaused(send('ho', false));
+    expect(h.audit[0]!.retryKey).toBe(h.audit[1]!.retryKey);
+    expect(h.audit[2]!.retryKey).not.toBe(h.audit[0]!.retryKey);
   });
 
   it('in enforce, answers with a rollback-triggering refusal on hosts whose site asks for it', async () => {
@@ -117,6 +141,28 @@ describe('onWebRequestError: blocks by the declarative rules', () => {
     onWebRequestError(err());
     expect(h.audit).toHaveLength(1);
     expect(h.audit[0]).toMatchObject({ source: 'dnr', verdict: 'block', enforced: true, method: 'PUT' });
+  });
+
+  // A PUT never reaches the debugger (LinkedIn's settings save the language by PUT): without the notice the page's
+  // own error looked like a network fault.
+  it('shows the in-page notice for a write refused by rule, as for the debugger\'s refusals', () => {
+    S.policy = policy('enforce');
+    onWebRequestError(err());
+    expect(sendMessage).toHaveBeenCalledWith(7, expect.objectContaining({ type: 'onlyread:blocked', reason: 'mutating-method', path: '/api/items', site: 'App', sig: expect.any(String) }));
+  });
+
+  it('shows no notice for a refusal with no tab, or one of the cover rules that refuse reads too', () => {
+    S.policy = policy('enforce');
+    S.failClosed = true;
+    try {
+      onWebRequestError(err({ method: 'POST' }));
+      expect(h.audit[0]).toMatchObject({ reason: 'fail-closed:debugger-detached' });
+    } finally {
+      S.failClosed = false;
+    }
+    onWebRequestError(err({ tabId: -1 }));
+    expect(h.audit).toHaveLength(2);
+    expect(sendMessage).not.toHaveBeenCalled();
   });
 
   it('ignores ordinary network errors, other hosts, and blocks no OnlyRead rule explains', () => {

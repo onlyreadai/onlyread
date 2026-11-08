@@ -102,6 +102,31 @@ describe('the demo coach card', () => {
     await new Promise((r) => setTimeout(r, 10));
     expect(card().shown).toBe(false);
   });
+  // On Like, LinkedIn shows its own "Something went wrong" toast in the corner; the notice frames it with a window over it
+  // (actions.ts). The card and the blurred backdrop lie between the notice and the page: without the same window they
+  // showed through it, an empty blurred box, instead of the toast.
+  it('cuts the window the notice keeps over the page\'s toast through the card and the backdrop too', async () => {
+    const notice = await import('./notice-root');
+    const shadow = document.createElement('div').attachShadow({ mode: 'open' });
+    const box = document.createElement('div');
+    box.className = 'box';
+    box.getBoundingClientRect = () => ({ left: 16, top: 600, width: 300, height: 160, right: 316, bottom: 760, x: 16, y: 600, toJSON: () => ({}) }) as DOMRect;
+    shadow.append(box);
+    notice.setNoticeRoot(shadow, () => {});
+    push({ type: 'demo:stopped', site: 'linkedin', name: 'Create' });
+    await new Promise((r) => setTimeout(r, 50)); // the card finds the notice on the next frames
+    const root = document.querySelector('[data-onlyread="demo"]')?.shadowRoot;
+    const layers = () => [root?.querySelector<HTMLElement>('.card'), root?.querySelector<HTMLElement>('.backdrop')].map((e) => e?.style.clipPath ?? '');
+    expect(layers()).toEqual(['', '']);
+    const rect = { left: 20, top: 712, width: 230, height: 40, right: 250, bottom: 752, x: 20, y: 712, toJSON: () => ({}) } as DOMRect;
+    notice.toastFramed({ rect, radius: 8 });
+    expect(layers().every((c) => c.startsWith('path(evenodd'))).toBe(true);
+    expect(layers()[1]).toContain('M 28 712 H 242'); // the backdrop's window, where the toast is on the page
+    notice.toastFramed(null);
+    expect(layers()).toEqual(['', '']);
+    push({ type: 'demo:ended', site: 'linkedin', restored: true });
+    await new Promise((r) => setTimeout(r, 10));
+  });
   it('ends step 2 at the end of its timer, closing OnlyRead\'s notice even while it is held open', async () => {
     const { NOTICE_MS } = await import('../shared/refusals');
     const notice = await import('./notice-root');

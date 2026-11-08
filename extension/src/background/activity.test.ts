@@ -69,17 +69,29 @@ describe('summarizeActivity', () => {
 
   it('groups the same refusal on the same site, stopped the same way, within seconds, into one row with a count', () => {
     const r = (ts: number, over: Partial<AuditEntry> = {}) => entry({ ts, verdict: 'block', enforced: true, reason: 'mutating-method', ...over });
-    const log = [r(now), r(now - 1_000), r(now - 3_000), r(now - 4_000, { url: 'https://app.example.com/x' }), r(now - 5_000), r(now - 60_000)];
+    const b = (n: number) => ({ bodyPreview: `{"title":"${n}"}` }); // three different changes, not one sent again
+    const log = [r(now, b(1)), r(now - 1_000, b(2)), r(now - 3_000, b(3)), r(now - 4_000, { url: 'https://app.example.com/x' }), r(now - 5_000), r(now - 60_000)];
     const rows = summarizeActivity(log, sites, now).recent;
     expect(rows.map((x) => [x.siteName, x.count ?? 1])).toEqual([['Linear', 3], ['App', 1], ['Linear', 1], ['Linear', 1]]);
     expect(summarizeActivity(log, sites, now)).toMatchObject({ total: 4, today: { refused: 6 } }); // today counts every refusal
   });
-  it('folds a page retrying the same refused change every few seconds into one row, however long it goes on', () => {
+  it('folds a page retrying the same refused change every few seconds into one row, however long it goes on, as one change', () => {
     const r = (ts: number) => entry({ ts, verdict: 'block', enforced: true, reason: 'mutating-method' });
     const retries = Array.from({ length: 60 }, (_, i) => r(now - i * 3_500)); // 3.5 minutes of retries
     const later = r(now - 60 * 3_500 - 30_000); // half a minute after the run: a row of its own
     const rows = summarizeActivity([...retries, later], sites, now).recent;
-    expect(rows.map((x) => x.count ?? 1)).toEqual([60, 1]);
+    expect(rows.map((x) => x.count ?? 1)).toEqual([1, 1]);
+  });
+  // LinkedIn resends a refused message twice, 4 and 8 seconds apart, as it was: one message, one change.
+  it('counts a request the site sent again as it was once, and a different one in the same run as another change', () => {
+    const send = (ts: number, body: string) => entry({ ts, verdict: 'block', enforced: true, source: 'rule', reason: 'decoded-write',
+      url: 'https://www.linkedin.com/voyager/api/voyagerMessagingDashMessengerMessages?action=createMessage', bodyShape: 'li:msg:w[send]', bodyPreview: body });
+    const linkedin = [...sites, site({ id: 'linkedin', name: 'LinkedIn', domains: ['linkedin.com'] })];
+    const first = '{"message":{"body":{"text":"hi"}},"trackingId":"a"}';
+    const rows = summarizeActivity([send(now, first), send(now - 8_000, first), send(now - 12_000, first)], linkedin, now).recent;
+    expect(rows.map((x) => [x.what, x.count ?? 1])).toEqual([['Send', 1]]);
+    const two = summarizeActivity([send(now, '{"trackingId":"b"}'), send(now - 4_000, first), send(now - 8_000, first)], linkedin, now).recent;
+    expect(two.map((x) => [x.what, x.count ?? 1])).toEqual([['Send', 2]]);
   });
   it('shows as many as asked, within bounds, and says when the log holds more', () => {
     const many = Array.from({ length: 150 }, (_, i) => entry({ ts: now - i * 60_000, verdict: 'block', enforced: true, reason: 'mutating-method' }));
