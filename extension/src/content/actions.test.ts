@@ -291,6 +291,31 @@ describe('the notice for refused writes', () => {
     vi.stubGlobal('navigator', real);
     dismiss();
   });
+  // The search for the page's own toast costs hit tests: it runs for a few seconds after a refusal, not for as long as
+  // the notice shows.
+  it('looks for the page\'s toast only for a few seconds after a refusal', () => {
+    vi.useFakeTimers();
+    const doc = document as unknown as { elementsFromPoint: () => Element[] };
+    const was = doc.elementsFromPoint;
+    let looks = 0;
+    doc.elementsFromPoint = () => { looks++; return []; };
+    try {
+      dismiss();
+      push({ type: 'onlyread:blocked', shape: 'li:msg:w[send]', reason: 'decoded-write', path: '/m', site: 'LinkedIn', sig: 'w1' });
+      vi.advanceTimersByTime(2_000);
+      const during = looks;
+      expect(during).toBeGreaterThan(0);
+      vi.advanceTimersByTime(1_500); // past the window, the notice still showing
+      const after = looks;
+      vi.advanceTimersByTime(2_000);
+      expect(notice().visible).toBe(true);
+      expect(looks).toBe(after);
+    } finally {
+      doc.elementsFromPoint = was;
+      dismiss();
+      vi.useRealTimers();
+    }
+  });
   // No z-index is above a modal dialog and its backdrop (LinkedIn's message box dimmed the notice under it): the notice
   // goes to the top layer as the newest there, inside the modal while one is open (everything outside it is inert).
   it('shows above a modal dialog, inside it, and moves back out to the page when the dialog closes', () => {

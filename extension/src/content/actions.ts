@@ -13,7 +13,7 @@ import { installAgentSetup } from './agent-setup';
 import { installAccountFrames } from './account-frames';
 import { installDemoCoach } from './demo-coach';
 import { setNoticeRoot } from './notice-root';
-import { findToast, holePath } from './site-toast';
+import { findToast, holePath, watchAppearances } from './site-toast';
 
 const NAME_MAX = 80;
 
@@ -384,43 +384,59 @@ function noticeParts(): NoticeParts {
 // leaves a window over it, so the page's words show inside OnlyRead's frame instead of under it (site-toast.ts).
 /** Room around the toast inside the frame. */
 const TOAST_PAD = 10;
+/** A toast that appeared this long before a refusal can still be the page's answer to it (the page may show its error a
+ *  moment before OnlyRead's notice arrives); one that was there earlier was there anyway. */
+const TOAST_BEFORE_MS = 3000;
+/** How long after a refusal the notice looks for the page's toast. */
+const TOAST_LOOK_MS = 3000;
+/** How long the frame follows the toast every frame once found: its slide-in and the notice growing around it. */
+const TOAST_FOLLOW_MS = 1000;
 let toastSearch: ReturnType<typeof setInterval> | undefined;
 let toastFrame = 0;
 let framedToast: HTMLElement | null = null;
+/** The newest refusal's time: the search window runs from it. */
+let refusedAt = 0;
 const isOurs = (el: Element) => Boolean(el.closest('[data-onlyread]'));
 
+/** A refusal: look for the page's toast for a few seconds; while one is framed, check now and then that it is still
+ *  there (the notice shrinks back when it goes), until the notice closes. */
 function followToast(): void {
+  refusedAt = Date.now();
   if (toastSearch) return;
   const look = () => {
     const box = parts?.box;
     if (!box || noticeHost?.style.display !== 'block') return;
-    const toast = findToast(box.getBoundingClientRect(), isOurs);
-    if (toast === framedToast) return;
-    framedToast = toast;
-    if (toast) frameToast(); else unframeBox();
+    if (framedToast) { placeFrame(); return; }
+    if (Date.now() - refusedAt > TOAST_LOOK_MS) return;
+    const toast = findToast(box.getBoundingClientRect(), isOurs, refusedAt - TOAST_BEFORE_MS);
+    if (toast) { framedToast = toast; frameToast(); }
   };
   look();
   toastSearch = setInterval(look, 250);
 }
 
-/** Sizes the notice around the framed toast and cuts its window, every frame while it shows (the toast slides in,
- *  the notice grows). */
+/** Sizes the notice around the framed toast and cuts its window. False once the toast is gone (the frame is undone). */
+function placeFrame(): boolean {
+  const box = parts?.box;
+  const toast = framedToast;
+  const t = toast?.isConnected ? toast.getBoundingClientRect() : undefined;
+  if (!box || !toast || !t?.width) { framedToast = null; unframeBox(); return false; }
+  box.style.left = `${Math.max(4, t.left - TOAST_PAD)}px`;
+  box.style.bottom = `${Math.max(4, window.innerHeight - t.bottom - TOAST_PAD)}px`;
+  box.style.minWidth = `${t.width + 2 * TOAST_PAD}px`;
+  box.style.paddingBottom = `${t.height + 2 * TOAST_PAD}px`;
+  const b = box.getBoundingClientRect();
+  const radius = Number.parseFloat(getComputedStyle(toast).borderTopLeftRadius) || 8;
+  box.style.clipPath = holePath(b.width, b.height, { left: t.left - b.left, top: t.top - b.top, width: t.width, height: t.height }, radius);
+  return true;
+}
+
+/** Frames the toast every frame while things move (its slide-in, the notice growing); the search's ticks keep it
+ *  placed after that. */
 function frameToast(): void {
   cancelAnimationFrame(toastFrame);
-  const step = () => {
-    const box = parts?.box;
-    const toast = framedToast;
-    if (!box || !toast?.isConnected) { framedToast = null; unframeBox(); return; }
-    const t = toast.getBoundingClientRect();
-    box.style.left = `${Math.max(4, t.left - TOAST_PAD)}px`;
-    box.style.bottom = `${Math.max(4, window.innerHeight - t.bottom - TOAST_PAD)}px`;
-    box.style.minWidth = `${t.width + 2 * TOAST_PAD}px`;
-    box.style.paddingBottom = `${t.height + 2 * TOAST_PAD}px`;
-    const b = box.getBoundingClientRect();
-    const radius = Number.parseFloat(getComputedStyle(toast).borderTopLeftRadius) || 8;
-    box.style.clipPath = holePath(b.width, b.height, { left: t.left - b.left, top: t.top - b.top, width: t.width, height: t.height }, radius);
-    toastFrame = requestAnimationFrame(step);
-  };
+  const until = Date.now() + TOAST_FOLLOW_MS;
+  const step = () => { if (placeFrame() && Date.now() < until) toastFrame = requestAnimationFrame(step); };
   step();
 }
 
@@ -756,6 +772,7 @@ function applyGuardConfig(c: GuardAnswer | undefined): void {
   if (c?.editorGuard) startEditorGuard(); else stopEditorGuard();
   setHoldClose(Boolean(c?.holdClose));
   setUploadGuard(Boolean(c?.uploadsOff));
+  if (window.top === window) watchAppearances(reporting); // a site toast is framed only where refusals can come
 }
 void chrome.runtime.sendMessage({ type: 'guard:config' }).then(applyGuardConfig).catch(() => {});
 chrome.runtime.onMessage.addListener((msg: GuardAnswer & { type?: string }) => {
