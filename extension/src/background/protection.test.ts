@@ -180,13 +180,18 @@ describe('storageLowering', () => {
     expect(storageLowering('pinFailures', { count: 6, retryAt: 9 }, undefined, none)).toBe('reset the wrong-PIN count');
     expect(storageLowering('pinFailures', { count: 1, retryAt: 0 }, { count: 2, retryAt: 0 }, none)).toBeUndefined();
   });
-  it("names clearing the agent-browser mark, and dropping the Pro tokens only in an agent's browser", () => {
+  it("names clearing the agent-browser mark, and any change to the Pro tokens only in an agent's browser", () => {
     expect(storageLowering('agentBrowser', { at: 1, account: 'a' }, undefined, none)).toBe('release this browser from its AI agent');
     expect(storageLowering('agentBrowser', undefined, { at: 1, account: 'a' }, none)).toBeUndefined();
     const t = { accessToken: 'a', refreshToken: 'r', expiresAt: 1 };
     expect(storageLowering('cloudTokens', t, undefined, none)).toBeUndefined();
     expect(storageLowering('cloudTokens', t, undefined, { agentBrowser: true })).toBe('sign out of OnlyRead Pro');
-    expect(storageLowering('cloudTokens', undefined, t, { agentBrowser: true })).toBeUndefined(); // a sign-in raises
+    // In an agent's browser the sign-in is the setup link's: one written from outside (another account's) is refused.
+    expect(storageLowering('cloudTokens', undefined, t, { agentBrowser: true })).toBe('change the OnlyRead Pro sign-in');
+    expect(storageLowering('cloudTokens', t, { ...t, accessToken: 'b' }, { agentBrowser: true })).toBe('change the OnlyRead Pro sign-in');
+    expect(storageLowering('cloudTokens', t, { ...t }, { agentBrowser: true })).toBeUndefined();
+    expect(storageLowering('cloudTokens', undefined, t, none)).toBeUndefined(); // elsewhere a sign-in raises
+    expect(storageLowering('cloudTokens', t, { ...t, accessToken: 'b' }, none)).toBeUndefined();
   });
   it('names writing the setup\'s undo record, not erasing it', () => {
     expect(storageLowering('agentSetup', undefined, { at: 1, sites: ['gmail'] }, none)).toBe("change the AI agent setup's undo record");

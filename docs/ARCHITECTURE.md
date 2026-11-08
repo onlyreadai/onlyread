@@ -679,7 +679,10 @@ change made in the extension applies at once, local first (kept in `policy.accou
 belongs to, through the settings lock like any change), and is sent in order once the account can be reached. One the
 account refuses (a removal made against a list changed elsewhere since) is undone, so the site is guarded again. A
 browser's own sites move to the account when it signs in, and come back to it when it signs out or the account ends,
-so leaving lowers nothing. A change from the account that lowers protection goes through the settings lock. Pro can
+so leaving lowers nothing. A change from the account that lowers protection goes through the settings lock, with one
+exception, in a browser that belongs to an agent: a change the person made on their account elsewhere applies there
+while an agent works too (a settings PIN still holds it), since nothing in that browser can make one. Its own sites
+stay its own. Pro can
 also set up an AI agent's browser. A change on the
 account reaches a signed-in browser within seconds: the service sends it an empty Web Push message (to the
 subscription the extension's service worker made, `cloud-push.ts`), or the account page, open in the same browser,

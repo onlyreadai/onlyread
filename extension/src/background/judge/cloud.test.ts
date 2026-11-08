@@ -265,11 +265,25 @@ describe('the account\'s site list (GET /v1/config)', () => {
     await signIn(c);
     // The ETag carries the browser count (c1: this browser, checked in by the poll itself).
     // No list saved yet: an active account still has its lists, empty (the extension's Pro mode keeps its sites there).
-    expect(await c.config()).toEqual({ changed: true, etag: '"0-c1"', config: { managed: true, version: 1, sites: {}, customSites: [], browserVersion: 0, browsers: 1 } });
+    // Each answer names the sign-in it was made for (cloud-sync.ts trusts a lowering by it).
+    const family = await c.family();
+    expect(family).toMatch(/^[0-9a-f-]{36}$/);
+    expect(await c.config()).toEqual({ changed: true, etag: '"0-c1"', config: { managed: true, version: 1, sites: {}, customSites: [], browserVersion: 0, browsers: 1, family, scope: 'full' } });
     await mock({ managed: { enabled: true, sites: { gmail: { enabled: true } }, customSites: [] } });
     const r = await c.config('"0-c1"');
-    expect(r).toEqual({ changed: true, etag: '"1-c1"', config: { managed: true, version: 1, sites: { gmail: { enabled: true } }, customSites: [], browserVersion: 0, browsers: 1 } });
+    expect(r).toEqual({ changed: true, etag: '"1-c1"', config: { managed: true, version: 1, sites: { gmail: { enabled: true } }, customSites: [], browserVersion: 0, browsers: 1, family, scope: 'full' } });
     expect(await c.config('"1-c1"')).toEqual({ changed: false });
+  });
+  it('keeps the sign-in an answer names only when it is a sign-in id', async () => {
+    const answer = (family: unknown, scope?: unknown) => new CloudClient({ serviceUrl: base, store: memoryStore({ accessToken: 'a', refreshToken: 'r', expiresAt: Date.now() + 3_600_000 }), fetchImpl: async () => new Response(JSON.stringify({ managed: true, version: 1, sites: {}, customSites: [], family, scope }), { status: 200 }) }).config();
+    const f = '0f8fad5b-d9cb-469f-a165-70867728950e';
+    expect(await answer(f)).toMatchObject({ config: { family: f } });
+    for (const bad of ['not-a-family', 7, null, undefined]) expect((await answer(bad, 'agent')) as { config: object }).not.toHaveProperty('config.family');
+    // The token's scope, with the sign-in only, and only as the service names them.
+    expect(await answer(f, 'agent')).toMatchObject({ config: { family: f, scope: 'agent' } });
+    expect(await answer(f, 'full')).toMatchObject({ config: { family: f, scope: 'full' } });
+    expect((await answer(f, 'admin')) as { config: object }).not.toHaveProperty('config.scope');
+    expect((await answer('bad', 'agent')) as { config: object }).not.toHaveProperty('config.scope');
   });
   it('reads a 404 (a server from before managed sites) as not managed, and a 402 as an inactive subscription', async () => {
     const c = new CloudClient({ serviceUrl: base, store: memoryStore() });
@@ -313,7 +327,7 @@ describe('editing the account\'s site list (POST /v1/config/sites)', () => {
     await signIn(c);
     await c.config(); // checked in: counted, and able to have sites of its own
     expect(await c.editSites({ add: { host: 'tools.example.net', name: 'Tools' } })).toEqual({
-      changed: true, etag: '"1-c1"', config: { managed: true, version: 1, sites: {}, customSites: [{ id: 'tools.example.net', name: 'Tools', domains: ['tools.example.net'], enabled: true }], browserVersion: 0, browsers: 1 },
+      changed: true, etag: '"1-c1"', config: { managed: true, version: 1, sites: {}, customSites: [{ id: 'tools.example.net', name: 'Tools', domains: ['tools.example.net'], enabled: true }], browserVersion: 0, browsers: 1, family: await c.family(), scope: 'full' },
     });
     expect(await c.config('"1-c1"')).toEqual({ changed: false });
     expect((await c.editSites({ remove: { id: 'tools.example.net' } })).config).toMatchObject({ version: 2, customSites: [] });

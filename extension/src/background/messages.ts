@@ -17,7 +17,7 @@ import * as dbg from './debugger';
 import * as observer from './observer';
 import * as uiactions from './uiactions';
 import * as typedSecrets from './typed-secrets';
-import { markAgentBrowser } from './agent-browser';
+import { markAgentBrowser, releaseAgentBrowser } from './agent-browser';
 import { ensurePush } from './cloud-push';
 import { cloudClient, cloudSignOut, cloudStatus, finishSignIn, whenSignedOut, setAgentName, signInFallback, signInWithSetupLink, startSignIn, pendingSignIn, takeSignIn } from './cloud-session';
 import { browserNameOf, isAgentName } from '../shared/agent-setup';
@@ -680,11 +680,22 @@ async function beginSignIn(tabId: number, back: string): Promise<string> {
   return startSignIn(tabId, back, fallback);
 }
 
+/** Why this browser may not sign in to Pro now, or undefined. Not while it is signed in (a sign-in to another account
+ *  would bring that account's list over this one's: sign out first), and never in an agent's browser, whose sign-in is
+ *  its setup link's (connectLink refuses the same two for a setup link). */
+async function signInRefused(): Promise<string | undefined> {
+  if (S.agentBrowser) return 'This browser belongs to an AI agent, so it is signed in from your OnlyRead Pro account page, with a setup link. Sign it out there first.';
+  if (await cloudClient().signedIn()) return 'This browser is already signed in to OnlyRead Pro. Sign out first to use another account.';
+  return undefined;
+}
+
 /** "Sign in" on the setup or settings page: that tab goes to the service's sign-in page and comes back when it ends
  *  (cloud-session.ts startSignIn; the result rides in the address, shared/sign-in-result.ts). */
 async function signIn(_msg: Of<'cloud:signin'>, sender: Sender) {
   const tabId = sender.tab?.id;
   if (tabId === undefined || !sender.url) return { ok: false, error: 'Sign in from the OnlyRead settings page.', cloud: await cloudStatus(false) };
+  const refused = await signInRefused();
+  if (refused) return { ok: false, error: refused, cloud: await cloudStatus(false) };
   // The sign-in makes Pro the judge (enterPro): asked of the lock now, before the tab leaves for nothing.
   if (S.policy.judge.provider !== 'cloud') {
     const next = { ...S.policy, judge: { ...S.policy.judge, provider: 'cloud' as const } };
@@ -701,23 +712,32 @@ async function signIn(_msg: Of<'cloud:signin'>, sender: Sender) {
 /** The service's done page handing back a sign-in code (the content script). Taken only from that page's top frame,
  *  in the tab the sign-in started in, with the state it started with; a new sign-in takes the account's site list at
  *  once, and the tab goes back to the page that asked, with the result. */
+/** Signs in with the done page's code and takes Pro on; why it did not, or undefined. Refused as when it started
+ *  (signInRefused): either may have changed since. */
+async function finishProSignIn(code: string, pending: NonNullable<Awaited<ReturnType<typeof takeSignIn>>>): Promise<string | undefined> {
+  try {
+    const refused = await signInRefused();
+    if (refused) throw new Error(refused);
+    await finishSignIn(code, pending);
+    await enterPro();
+    await syncManagedSites('signed-in');
+    void ensurePush('signed-in');
+    void notifyAccountPages('this-browser-changed'); // an account page open here now lists this browser as its own
+    return undefined;
+  } catch (err) {
+    const error = errorText(err);
+    system(`cloud:sign-in failed: ${error}`.slice(0, 200));
+    return error;
+  }
+}
+
 async function proSignInCode(msg: Of<'page:signin-code'>, sender: Sender) {
   const tabId = sender.tab?.id;
   if (tabId === undefined || sender.frameId !== 0 || !isSignInDonePage(sender.url, S.policy.cloud.serviceUrl)) return ok;
   if (typeof msg.code !== 'string' || typeof msg.state !== 'string') return ok;
   const pending = await takeSignIn(msg.state, tabId);
   if (!pending) return ok;
-  let error: string | undefined;
-  try {
-    await finishSignIn(msg.code, pending);
-    await enterPro();
-    await syncManagedSites('signed-in');
-    void ensurePush('signed-in');
-    void notifyAccountPages('this-browser-changed'); // an account page open here now lists this browser as its own
-  } catch (err) {
-    error = errorText(err);
-    system(`cloud:sign-in failed: ${error}`.slice(0, 200));
-  }
+  const error = await finishProSignIn(msg.code, pending);
   // The tab goes back to the page that asked, which shows the result (the setup window then goes on to its demo). A
   // sign-in from the settings page that went through goes on to the Pro account page instead, where Pro mode is
   // managed (PLAN-PRO-UI step 5), with the demo opened over it.
@@ -825,22 +845,37 @@ async function hasOwnKey(): Promise<boolean> {
 }
 
 /** A setup link's code: signs this browser in to the Pro account that made the link. Never over a sign-in this
- *  browser already has, or a key of its own: a link only connects a browser that has neither. */
+ *  browser already has, or a key of its own: a link only connects a browser that has neither. A browser already marked
+ *  as an agent's that lost its sign-in may take one again (it moves no sites of its own to the account either way). */
 async function connectLink(code: string, ownKey: boolean): Promise<{ connected?: string; connectError?: string }> {
   if (ownKey) return { connectError: 'This browser uses its own AI key, so the link did not connect it to Pro.' };
   if ((await cloudStatus(false)).signedIn) return { connectError: 'This browser is already signed in to OnlyRead Pro. The link was not used.' };
+  // Marked before the code is redeemed, so no sync can see the new sign-in in a browser not yet marked: an agent's
+  // browser moves no sites of its own to the account (cloud-sync.ts moveLocalSites). Released again if the link signs
+  // nothing in, unless it was marked before.
+  const wasMarked = S.agentBrowser;
+  if (!wasMarked) await markAgentBrowser('a setup link being used');
+  let st: Awaited<ReturnType<typeof signInWithSetupLink>>;
   try {
-    const st = await signInWithSetupLink(code);
+    st = await signInWithSetupLink(code);
+  } catch (err) {
+    if (!wasMarked) await releaseAgentBrowser('the setup link signed nothing in').catch(() => {});
+    return linkFailed(err);
+  }
+  try {
+    await markAgentBrowser(st.account?.name || st.account?.email || 'your account'); // the account's name in the mark
     await enterPro();
     await syncManagedSites('signed-in');
     void ensurePush('signed-in');
     void notifyAccountPages('this-browser-changed'); // an account page open here now lists this browser as its own
     return { connected: st.account?.name || st.account?.email || 'your account' };
-  } catch (err) {
-    system(`agent-setup:link failed ${errorText(err)}`.slice(0, 200));
-    const gone = err instanceof CloudError && err.code === 'not_signed_in';
-    return { connectError: gone ? 'The setup link has expired or was already used. Make a new one on your account page.' : `The setup link could not be used (${errorText(err)}).` };
-  }
+  } catch (err) { return linkFailed(err); }
+}
+
+function linkFailed(err: unknown): { connectError: string } {
+  system(`agent-setup:link failed ${errorText(err)}`.slice(0, 200));
+  const gone = err instanceof CloudError && err.code === 'not_signed_in';
+  return { connectError: gone ? 'The setup link has expired or was already used. Make a new one on your account page.' : `The setup link could not be used (${errorText(err)}).` };
 }
 
 /** Keeps what a setup changed, merged with an earlier one of the last day, for the settings page's Undo. */
@@ -904,8 +939,7 @@ async function setupLink(msg: Of<'page:agent-setup-link'>, sender: Sender) {
   if (!req.connect) return { ok: false, error: 'This setup link is not complete. Ask the person for a new one from their account page.' };
   if (msg.clicked !== true && !linkRunsByItself((await chrome.storage.local.get(INSTALLED_KEY))[INSTALLED_KEY])) return { ok: true, needsClick: true };
   const result = await runSetup(linkRequest(req.connect));
-  if (!result.ok) return result;
-  if (result.connected) await markAgentBrowser(result.connected);
+  if (!result.ok) return result; // a link that signed in marked the browser already (connectLink)
   const cloud = await cloudStatus(false);
   return {
     ...result,

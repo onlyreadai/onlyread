@@ -85,7 +85,8 @@ export const LOCKED_PREFIX = 'locked:';
 // a change to one that arrives unstamped was written around the background, and when it lowers protection while the
 // lock holds, index.ts puts the old value back, so a driven settings page cannot remove the PIN, replace the judge's key,
 // reset the wrong-PIN count, clear the agent-browser mark or drop the Pro tokens with `chrome.storage.local` directly,
-// past the lock and with no line in the log.
+// past the lock and with no line in the log. (The sign-in the account's list came from, `managedFrom`, is kept apart:
+// cloud-sync.ts puts back any outside write to it, lock or not.)
 
 export const GUARDED_KEYS = ['settingsPin', 'secrets', 'pinFailures', 'agentBrowser', 'cloudTokens', 'agentSetup', 'firstJudgeAt'] as const;
 export type GuardedKey = (typeof GUARDED_KEYS)[number];
@@ -98,7 +99,8 @@ const num = (v: unknown, field: string): number => Number((v as Record<string, u
 /** How a change to `key`, from `oldValue` to `newValue`, lowers protection, in words for the person, or undefined when it
  *  does not: a first key added, more wrong-PIN tries recorded and a sign-in raise or keep it. Setting a first PIN counts,
  *  as in messages.ts setPin: an agent must not set one the person does not know (lockFor refuses it only while an agent
- *  is at work). Dropping the Pro tokens counts only in a browser that belongs to an agent, where signing out is refused. */
+ *  is at work). Any change to the Pro tokens counts only in a browser that belongs to an agent, where signing out and
+ *  signing in again are refused. */
 type Lowering = (oldValue: unknown, newValue: unknown, state: { agentBrowser: boolean }) => string | undefined;
 
 function pinLowering(oldValue: unknown, newValue: unknown): string | undefined {
@@ -121,7 +123,12 @@ const LOWERINGS: Record<GuardedKey, Lowering> = {
   secrets: keyLowering,
   pinFailures: (o, n) => (num(n, 'count') < num(o, 'count') || num(n, 'retryAt') < num(o, 'retryAt') ? 'reset the wrong-PIN count' : undefined),
   agentBrowser: (o, n) => (present(o) && !present(n) ? 'release this browser from its AI agent' : undefined),
-  cloudTokens: (o, n, state) => (state.agentBrowser && present(o) && !present(n) ? 'sign out of OnlyRead Pro' : undefined),
+  // In an agent's browser the sign-in is the setup link's, and only the background changes it (a refresh, a sign-out it
+  // was told of): one written from outside, another account's included, would bring a list that is not the person's.
+  cloudTokens: (o, n, state) => {
+    if (!state.agentBrowser || JSON.stringify(o ?? null) === JSON.stringify(n ?? null)) return undefined;
+    return present(o) && !present(n) ? 'sign out of OnlyRead Pro' : 'change the OnlyRead Pro sign-in';
+  },
   // The setup's undo record (agent-setup.ts): a record written from outside would have Undo switch off what the person
   // set. Erasing one only takes the Undo away, which lowers nothing.
   // The first-judge record (shared/first-judge.ts): while there is none, choosing an AI judge passes an agent at work

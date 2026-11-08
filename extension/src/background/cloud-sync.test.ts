@@ -78,6 +78,7 @@ let pendingManaged: typeof import('./cloud-sync').pendingManaged;
 let syncManagedSites: typeof import('./cloud-sync').syncManagedSites;
 let cloudClient: typeof import('./cloud-session').cloudClient;
 let finishSignIn: typeof import('./cloud-session').finishSignIn;
+let signInWithSetupLink: typeof import('./cloud-session').signInWithSetupLink;
 let startSignIn: typeof import('./cloud-session').startSignIn;
 let takeSignIn: typeof import('./cloud-session').takeSignIn;
 let pkceChallenge: typeof import('./judge/cloud').pkceChallenge;
@@ -99,7 +100,7 @@ async function freshModules(): Promise<void> {
   ({ carryManaged, defaultPolicy, getPolicy, lastWrittenPolicy, normalizePolicy, onPolicyChange, policyAccepted, setPolicy } = await import('./policy'));
   ({ lockFor, weakeningChanges } = await import('./protection'));
   ({ accountRefusal, applyPendingManaged, flushAccountEdits, initManagedSync, managedPollDue, pendingManaged, syncManagedSites } = await import('./cloud-sync'));
-  ({ cloudClient, finishSignIn, startSignIn, takeSignIn } = await import('./cloud-session'));
+  ({ cloudClient, finishSignIn, signInWithSetupLink, startSignIn, takeSignIn } = await import('./cloud-session'));
   ({ pkceChallenge, randomToken, signInUrl } = await import('./judge/cloud'));
   records = vi.spyOn(await import('./audit'), 'record');
   onPolicyChange((p, own) => {
@@ -154,6 +155,29 @@ async function signInAsExtension(): Promise<void> {
   const done = (await fetch(await startSignIn(1, 'chrome-extension://x/options.html'), { redirect: 'manual' })).headers.get('location')!;
   const p = new URLSearchParams(new URL(done).hash.slice(1));
   await finishSignIn(p.get('code')!, (await takeSignIn(p.get('state')!, 1))!);
+}
+
+/** This browser signed in by a setup link instead (agent scope), as an agent's browser is. */
+async function linkSignIn(): Promise<void> {
+  delete store.cloudTokens;
+  const { code } = (await (await fetch(`${base}/__setup-link`, { method: 'POST' })).json()) as { code: string };
+  await signInWithSetupLink(code);
+}
+
+/** The worker restarted: fresh modules over the same storage, read as startup reads it. */
+async function restart(): Promise<void> {
+  await settled();
+  await freshModules();
+  S.policy = await getPolicy();
+}
+
+/** This browser's tokens lost (dropped around the background: no sign-out hook runs), then a sign-in to another
+ *  account, whose list is `sites`. */
+async function otherSignIn(sites: Record<string, boolean>): Promise<void> {
+  delete store.cloudTokens;
+  await mock({ reset: true });
+  await list(sites);
+  await signInAsExtension();
 }
 
 async function signIn(): Promise<void> {
@@ -229,9 +253,10 @@ describe('the Pro account\'s site list', () => {
     expect(pendingManaged()).toBeUndefined();
   });
 
-  it('defers a list that switches a site off while an agent works, and applies it when the session ends', async () => {
+  it('defers a list that switches a site off while an agent works, its sign-in the one kept too, and applies it when the session ends', async () => {
     await list({ gmail: true, linear: true });
     await sync();
+    expect(store.managedFrom).toEqual({ family: await cloudClient().family() }); // the first list's sign-in, kept
     S.agentSession = true;
     await list({ gmail: true, linear: false });
     await sync('agent-session-start');
@@ -246,6 +271,91 @@ describe('the Pro account\'s site list', () => {
     expect(enabledSiteIds()).toEqual(['gmail', 'app.example.com']);
     expect(S.policy.managed?.version).toBe(2);
     expect(pendingManaged()).toBeUndefined();
+  });
+
+  it('a list from another sign-in that lowers waits for the whole lock, its additions guarded meanwhile; its sign-in is kept only once the lock opens', async () => {
+    await list({ gmail: true, linear: true }); // account A
+    await sync();
+    const a = store.managedFrom;
+    S.agentSession = true;
+    await otherSignIn({ linear: true, x: true }); // account B, signed in while the agent works
+    await sync('signed-in');
+    expect(enabledSiteIds()).toEqual(['gmail', 'linear', 'x', 'app.example.com']);
+    expect(pendingManaged()).toBe('Your Pro account asks to switch gmail off; this applies when the agent session ends');
+    expect(store.managedFrom).toEqual(a);
+    await sync('poll'); // a 304: the pending list offered again, with the sign-in the service named for it, still held
+    expect(enabledSiteIds()).toEqual(['gmail', 'linear', 'x', 'app.example.com']);
+    await list({ x: true }); // a newer list replaces the pending one
+    await sync('push');
+    expect(pendingManaged()).toMatch(/linear/);
+    S.agentSession = false;
+    await applyPending('agent-session-end');
+    expect(enabledSiteIds()).toEqual(['x', 'app.example.com']);
+    expect(store.managedFrom).toEqual({ family: await cloudClient().family() }); // B's, kept once the lock opened
+  });
+
+  it('a list from another sign-in that only adds is applied, but its sign-in is not kept while the lock holds', async () => {
+    await list({ gmail: true });
+    await sync();
+    const a = store.managedFrom;
+    S.agentSession = true;
+    await otherSignIn({ gmail: true, linear: true }); // an agent's own account, whose list adds to A's
+    await sync('signed-in');
+    expect(enabledSiteIds()).toEqual(['gmail', 'linear', 'app.example.com']);
+    expect(store.managedFrom).toEqual(a);
+    await list({}); // then it lowers: still another sign-in's list
+    await sync('push');
+    expect(enabledSiteIds()).toEqual(['gmail', 'linear', 'app.example.com']);
+    expect(pendingManaged()).toMatch(/this applies when the agent session ends/);
+  });
+
+  it('drops an answer fetched across a sign-in: it could be either account\'s', async () => {
+    await list({ gmail: true });
+    await sync();
+    const real = globalThis.fetch;
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    const spy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const res = await real(input, init);
+      if (String(input).includes('/v1/config')) await gate;
+      return res;
+    });
+    try {
+      await list({});
+      const p = syncManagedSites('poll');
+      await vi.waitFor(() => expect(spy.mock.calls.some(([u]) => String(u).includes('/v1/config'))).toBe(true));
+      await signInAsExtension(); // another sign-in lands while the answer is on its way
+      release();
+      await p; await settled();
+    } finally { spy.mockRestore(); }
+    expect(logged()).toContain('managed-sites:dropped(poll) fetched across a sign-in');
+    expect(enabledSiteIds()).toEqual(['gmail', 'app.example.com']);
+  });
+
+  it('a list kept from before this version (no sign-in kept) meets the lock as then, and the first list applied names its sign-in', async () => {
+    await list({ gmail: true, linear: true });
+    await sync();
+    delete store.managedFrom;
+    await restart();
+    S.agentSession = true;
+    await list({ gmail: true, linear: false });
+    await sync('push');
+    expect(enabledSiteIds()).toEqual(['gmail', 'linear', 'app.example.com']); // an agent session holds it, as then
+    expect(store.managedFrom).toBeUndefined();
+    S.agentSession = false;
+    await applyPending('agent-session-end');
+    expect(enabledSiteIds()).toEqual(['gmail', 'app.example.com']);
+    expect(store.managedFrom).toEqual({ family: await cloudClient().family() });
+  });
+
+  it('a sign-in that ends takes the account\'s lists with it, and the sign-in kept', async () => {
+    await list({ gmail: true });
+    await sync();
+    expect(store.managedFrom).toBeDefined();
+    await cloudClient().signOut(); // no sign-out handler runs here: the tokens' own hook does (cloud-session.ts whenSignedOut)
+    await vi.waitFor(async () => { await settled(); expect(S.policy.managed).toBeUndefined(); });
+    expect(store.managedFrom).toBeUndefined();
+    expect(enabledSiteIds()).toEqual(['gmail', 'app.example.com']); // copied into this browser's own (D14)
   });
 
   it('with a settings PIN, waits for it, whether or not an agent is active', async () => {
@@ -267,7 +377,7 @@ describe('the Pro account\'s site list', () => {
   it('a newer list replaces the pending one', async () => {
     await list({ gmail: true, linear: true });
     await sync();
-    S.agentSession = true;
+    store.settingsPin = { salt: 's', hash: 'h', iterations: 1 };
     await list({ gmail: false, linear: true });
     await sync();
     expect(pendingManaged()).toMatch(/switch gmail off/);
@@ -495,6 +605,7 @@ describe("an agent's browser and the levels", () => {
   afterEach(() => { S.agentBrowser = false; S.agentSession = false; });
 
   it("applies a lowering from the account in an agent's browser: it is the person's, made on the account page", async () => {
+    await linkSignIn(); // the browser's sign-in is a setup link's: the service says its scope is agent
     await list({ gmail: true, linear: true });
     await sync();
     S.agentBrowser = true;
@@ -502,22 +613,129 @@ describe("an agent's browser and the levels", () => {
     await sync('poll');
     expect(enabledSiteIds()).toEqual(['gmail', 'app.example.com']);
     expect(pendingManaged()).toBeUndefined();
-    // A detected session still defers it, as in any browser.
+    // During a detected session too: the list comes from the sign-in kept, a setup link's.
     S.agentSession = true;
     await list({ linear: false });
     await sync('poll');
-    expect(enabledSiteIds()).toEqual(['gmail', 'app.example.com']);
-    expect(pendingManaged()).toBe('Your Pro account asks to switch gmail off; this applies when the agent session ends');
+    expect(enabledSiteIds()).toEqual(['app.example.com']);
+    expect(pendingManaged()).toBeUndefined();
   });
 
-  it('a mixed update during an agent session guards what it adds at once, at every level, and lowers nothing', async () => {
+  it("the mark alone does not lift the session hold: over the person's full sign-in a lowering waits, as anywhere", async () => {
+    await list({ gmail: true, linear: true }); // the person's full sign-in (beforeEach)
+    await sync();
+    S.agentBrowser = true; // say an outside write added the mark
+    S.agentSession = true;
+    await list({ gmail: true });
+    await sync('push');
+    expect(enabledSiteIds()).toEqual(['gmail', 'linear', 'app.example.com']);
+    expect(pendingManaged()).toBe('Your Pro account asks to switch linear off; this applies when the agent session ends');
+  });
+
+  it("in an agent's browser a list from another sign-in never lowers anything, and its sign-in is never kept", async () => {
+    await list({ gmail: true });
+    await sync();
+    const a = store.managedFrom;
+    S.agentBrowser = true;
+    await otherSignIn({ gmail: true, linear: true }); // another account an agent signed this browser in to, adding first
+    await sync('signed-in');
+    expect(enabledSiteIds()).toEqual(['gmail', 'linear', 'app.example.com']);
+    expect(store.managedFrom).toEqual(a);
+    await list({});
+    await sync('push');
+    expect(enabledSiteIds()).toEqual(['gmail', 'linear', 'app.example.com']);
+    expect(pendingManaged()).toBe("Your Pro account asks to switch gmail off, switch linear off; this browser belongs to an AI agent, and a list from another sign-in can't lower what it guards");
+    await applyPending('agent-session-end');
+    expect(enabledSiteIds()).toEqual(['gmail', 'linear', 'app.example.com']);
+  });
+
+  it("in an agent's browser the sign-in kept is the background's: one written to its key from outside is not trusted", async () => {
+    await list({ gmail: true });
+    await sync();
+    S.agentBrowser = true;
+    await otherSignIn({ gmail: true });
+    await sync('signed-in');
+    store.managedFrom = { family: await cloudClient().family() }; // say an outside write was not put back
+    await list({});
+    await sync('push');
+    expect(enabledSiteIds()).toEqual(['gmail', 'app.example.com']);
+    expect(pendingManaged()).toMatch(/a list from another sign-in can't lower/);
+  });
+
+  it("a worker an outside write woke, which read the written sign-in at startup, still keeps the one before it", async () => {
+    await list({ gmail: true, linear: true }); // account A, its sign-in kept
+    await sync();
+    const a = store.managedFrom;
+    await otherSignIn({ gmail: true, linear: true }); // the tokens now an agent's own account's (G), no sync yet
+    const g = await cloudClient().family();
+    await restart(); // the worker stopped
+    S.agentBrowser = true;
+    // The outside write that wakes it: the sign-in kept named as G's. Startup reads storage before the change event
+    // that says the write was not the background's.
+    await local.set({ managedFrom: { family: g } });
+    initManagedSync({ whenReady: () => Promise.resolve() });
+    await settled();
+    expect(records.mock.calls.map(([e]) => (e as { reason: string }).reason)).toContain('managed-sites:kept-sign-in outside write put back');
+    expect(store.managedFrom).toEqual(a); // storage says A's again
+    await list({}); // G lowers
+    await sync('push');
+    expect(enabledSiteIds()).toEqual(['gmail', 'linear', 'app.example.com']);
+    expect(pendingManaged()).toMatch(/a list from another sign-in can't lower/);
+  });
+
+  it('two outside writes in a row to the sign-in kept: memory and storage keep the one before the first', async () => {
+    await linkSignIn();
+    await list({ gmail: true, linear: true });
+    await sync();
+    const a = store.managedFrom;
+    // The second change's old value is the first write's: neither is taken.
+    void local.set({ managedFrom: { family: '7c9e6679-7425-40de-944b-e07fc1f90ae7' } });
+    void local.set({ managedFrom: { family: '16fd2706-8baf-433b-82eb-8c7fada847da' } });
+    await settled();
+    await vi.waitFor(() => expect(store.managedFrom).toEqual(a));
+    // Memory still names A's sign-in: in an agent's browser, A's lowering applies past a session.
+    S.agentBrowser = true; S.agentSession = true;
+    await list({ gmail: true });
+    await sync('push');
+    expect(enabledSiteIds()).toEqual(['gmail', 'app.example.com']);
+  });
+
+  it("in an agent's browser another sign-in whose list is the one in force, unchanged, is not kept either", async () => {
+    await list({ gmail: true });
+    await sync();
+    const a = store.managedFrom;
+    S.agentBrowser = true;
+    await otherSignIn({ gmail: true }); // the same list, so nothing is written
+    await sync('signed-in');
+    expect(store.managedFrom).toEqual(a);
+    await list({});
+    await sync('push');
+    expect(enabledSiteIds()).toEqual(['gmail', 'app.example.com']);
+  });
+
+  it("in an agent's browser, a list kept from before this version (no sign-in kept) lowers as then, with no session", async () => {
+    await list({ gmail: true, linear: true });
+    await sync();
+    delete store.managedFrom;
+    await restart();
+    S.agentBrowser = true;
+    await list({ gmail: true });
+    await sync('push');
+    expect(enabledSiteIds()).toEqual(['gmail', 'app.example.com']);
+    expect(store.managedFrom).toEqual({ family: await cloudClient().family() });
+  });
+
+  it('a mixed update from another sign-in during an agent session guards what it adds at once, at every level, and lowers nothing', async () => {
     await mock({ managed: { enabled: true, sites: {}, customSites: [], browserSites: { sites: { gmail: { enabled: true } }, customSites: [] }, guardAll: { on: true, excludeSites: [] } } });
     await sync();
     expect(S.policy.effective.targetDomains).toContain('mail.google.com');
     expect(S.policy.effective.guardAll).toBe(true);
     S.agentSession = true;
+    delete store.cloudTokens;
+    await mock({ reset: true });
     await mock({ managed: { enabled: true, sites: {}, customSites: [], browserSites: { sites: {}, customSites: [site('crm.example.com')] }, guardAll: { on: true, excludeSites: ['shop.example.com'] } } });
-    await sync('poll');
+    await signInAsExtension();
+    await sync('signed-in');
     // Meanwhile: the CRM guarded, Gmail kept, no allowance.
     expect(S.policy.effective.targetDomains).toEqual(expect.arrayContaining(['mail.google.com', 'crm.example.com']));
     expect(S.policy.effective.excludeDomains).toEqual([]);
@@ -551,6 +769,19 @@ describe('Pro mode: this browser\'s site changes go to the account', () => {
     expect(sent()).toEqual(['local-sites:moved (signed-in) 1 to the account list', 'account-edit:sent add account app.example.com']);
     // Never weaker on the way: every policy written guarded the site.
     expect(log.filter((l) => l.includes('settings-locked'))).toEqual([]);
+  });
+
+  it("in an agent's browser its own sites stay its own: none move to the account", async () => {
+    S.agentBrowser = true;
+    try {
+      await pro();
+      await sync('signed-in');
+      expect(S.policy.customSites.map((c) => c.id)).toEqual(['app.example.com']);
+      expect(S.policy.accountEdits).toBeUndefined();
+      expect(S.policy.managed?.customSites).toEqual([]);
+      expect(enabledSiteIds()).toEqual(['app.example.com']);
+      expect(sent()).toEqual([]);
+    } finally { S.agentBrowser = false; }
   });
 
   it('a change the account takes leaves the queue while an agent works, though the policy in force lags the answer', async () => {

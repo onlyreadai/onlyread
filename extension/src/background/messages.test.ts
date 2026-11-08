@@ -5,6 +5,9 @@ import type { Message, Policy, Status } from '../shared/types';
 // and records it, the cache records imports, and everything else answers a fixed value.
 const h = vi.hoisted(() => ({
   saved: [] as Policy[],
+  /** Whether the browser was marked as an agent's when a setup link signed it in, and at that sign-in's first sync. */
+  linkSignedInAgentBrowser: undefined as boolean | undefined,
+  agentBrowserAtSync: undefined as boolean | undefined,
   /** judges.ts tryByokJudge: the candidate own-key judge's test, passing unless a test says otherwise. */
   tryJudge: vi.fn(async (..._args: unknown[]): Promise<Record<string, unknown>> => ({ ok: true, judge: 'jev', latencyMs: 1 })),
   notify: vi.fn(async (_type?: string) => {}),
@@ -55,6 +58,7 @@ vi.mock('./cloud-session', () => ({
     return { ...p, verifier: 'v', redirect: 'r', at: 0 };
   }),
   finishSignIn: (code: string) => h.finish(code),
+  signInWithSetupLink: vi.fn(async () => { h.linkSignedInAgentBrowser = S.agentBrowser; return { provider: 'cloud', signedIn: true, account: { email: 'p@example.com' } }; }),
   pendingSignIn: vi.fn(async () => (h.signIn ? { ...h.signIn, verifier: 'v', redirect: 'r', at: 0 } : undefined)),
 }));
 vi.mock('./cloud-sync', () => ({ syncManagedSites: h.sync, applyPendingManaged: h.applyPending, flushAccountEdits: h.edit, accountRefusal: () => undefined, accountBrowsers: (p: Policy) => p.managed?.browsers ?? 1, notifyAccountPages: h.notify, pendingManaged: () => h.pending, whenLockOpens: (fn: () => void) => { h.lockOpenHooks.push(fn); } }));
@@ -668,6 +672,49 @@ describe('the Pro account\'s site list (cloud-sync.ts)', () => {
     expect(h.sync).toHaveBeenLastCalledWith('signed-in');
     await send({ type: 'cloud:signout' });
     expect(h.sync).toHaveBeenLastCalledWith('signed-out');
+  });
+
+  it('a setup link marks the browser before it is redeemed, unmarks it when it signs nothing in, and reconnects a marked browser that lost its sign-in', async () => {
+    S.policy = { ...S.policy, cloud: { ...S.policy.cloud, serviceUrl: 'https://pro.example' } };
+    const setupPage = { ...tab('https://pro.example/agent-setup', 9), frameId: 0 };
+    const link = { type: 'page:agent-setup-link', connect: 'a'.repeat(43), clicked: true } as const;
+    const redeem = vi.mocked((await import('./cloud-session')).signInWithSetupLink);
+    h.sync.mockImplementation(async (why: string) => { if (why === 'signed-in') h.agentBrowserAtSync = S.agentBrowser; });
+    try {
+      // A code that signs nothing in: the mark set for it goes again.
+      redeem.mockRejectedValueOnce(new Error('expired'));
+      expect(await send(link, setupPage)).toMatchObject({ ok: true, connectError: expect.stringMatching(/could not be used/) });
+      expect(S.agentBrowser).toBe(false);
+      // One that does: marked before the code was redeemed, so before any sync could see the sign-in.
+      expect(await send(link, setupPage)).toMatchObject({ ok: true, connected: expect.any(String) });
+      expect(h.linkSignedInAgentBrowser).toBe(true);
+      expect(h.agentBrowserAtSync).toBe(true);
+      // A marked browser that lost its sign-in takes a link again, and stays marked if that one fails.
+      h.agentBrowserAtSync = undefined;
+      redeem.mockRejectedValueOnce(new Error('expired'));
+      expect(await send(link, setupPage)).toMatchObject({ connectError: expect.stringMatching(/could not be used/) });
+      expect(S.agentBrowser).toBe(true);
+      expect(await send(link, setupPage)).toMatchObject({ ok: true, connected: expect.any(String) });
+      expect(h.agentBrowserAtSync).toBe(true);
+    } finally { S.agentBrowser = false; h.sync.mockImplementation(async () => {}); }
+  });
+
+  it('refuses a sign-in while signed in, and in an agent\'s browser, whether asked or finished', async () => {
+    S.policy = { ...S.policy, cloud: { ...S.policy.cloud, serviceUrl: 'https://pro.example' } };
+    h.client.signedIn.mockResolvedValue(true);
+    expect(await send({ type: 'cloud:signin' }, tab('chrome-extension://onlyread/options.html', 9))).toMatchObject({ ok: false, error: expect.stringMatching(/already signed in/) });
+    h.client.signedIn.mockResolvedValue(false);
+    S.agentBrowser = true;
+    try {
+      expect(await send({ type: 'cloud:signin' }, tab('chrome-extension://onlyread/options.html', 9))).toMatchObject({ ok: false, error: expect.stringMatching(/belongs to an AI agent/) });
+      // A sign-in started before the browser was marked is not finished either.
+      S.agentBrowser = false;
+      expect(await send({ type: 'cloud:signin' }, tab('chrome-extension://onlyread/setup.html', 9))).toMatchObject({ ok: true });
+      S.agentBrowser = true;
+      h.sync.mockClear();
+      await send({ type: 'page:signin-code', code: 'c', state: 's1' }, { ...tab('https://pro.example/signin/done', 9), frameId: 0 });
+      expect(h.sync).not.toHaveBeenCalledWith('signed-in');
+    } finally { S.agentBrowser = false; }
   });
 
   it('an email link opened in another tab brings the window the sign-in started in forward, and closes the link\'s tab', async () => {

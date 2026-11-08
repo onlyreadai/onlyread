@@ -109,7 +109,9 @@ interface TokenResponse { access_token: string; refresh_token: string; expires_i
 /** GET /v1/config: the guarded-site list the account manages, or that it manages none (cloud-sync.ts). */
 /** `browserVersion`: this browser's own list version on the account, which its removals are made against;
  *  `browsers`: how many browsers are signed in to the account (one: a site goes on the account's list; more: asked). */
-type ConfigExtras = { browserVersion?: number; browsers?: number };
+/** `family` and `scope`: the sign-in the service made the answer for and what its token may do, from the token it
+ *  checked (cloud-sync.ts trusts a lowering by them, never by the token kept here, which is read unverified). */
+type ConfigExtras = { browserVersion?: number; browsers?: number; family?: string; scope?: 'full' | 'agent' };
 export type CloudConfig =
   | ({ managed: true; version: number; sites: Record<string, { enabled: boolean }>; customSites: CustomSite[]; guardAll?: unknown; browser?: unknown; browserSites?: unknown } & ConfigExtras)
   | ({ managed: false; version: number } & ConfigExtras);
@@ -130,7 +132,9 @@ async function readConfig(res: Response, what: string): Promise<{ changed: true;
   if (!Number.isInteger(version) || (version as number) < 0 || typeof d?.managed !== 'boolean') throw new CloudError('bad_response', what);
   const tag = res.headers.get('etag') ?? undefined;
   const count = (v: unknown) => (Number.isInteger(v) && (v as number) >= 0 ? (v as number) : undefined);
-  const extras: ConfigExtras = { ...(count(d.browserVersion) !== undefined ? { browserVersion: count(d.browserVersion) } : {}), ...(count(d.browsers) !== undefined ? { browsers: count(d.browsers) } : {}) };
+  const family = typeof d.family === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(d.family)
+    ? { family: d.family, ...(d.scope === 'agent' || d.scope === 'full' ? { scope: d.scope } : {}) } : {};
+  const extras: ConfigExtras = { ...(count(d.browserVersion) !== undefined ? { browserVersion: count(d.browserVersion) } : {}), ...(count(d.browsers) !== undefined ? { browsers: count(d.browsers) } : {}), ...family };
   if (!d.managed) return { changed: true, etag: tag, config: { managed: false, version: version as number, ...extras } };
   if (!d.sites || typeof d.sites !== 'object' || !Array.isArray(d.customSites)) throw new CloudError('bad_response', `${what}: sites`);
   return { changed: true, etag: tag, config: { managed: true, version: version as number, sites: d.sites as Record<string, { enabled: boolean }>, customSites: d.customSites as CustomSite[], guardAll: d.guardAll, browser: d.browser, browserSites: d.browserSites, ...extras } };

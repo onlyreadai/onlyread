@@ -284,7 +284,7 @@ export function cloudRouter(): express.Router {
 
   // The ETag says whether the list is in force as well as its version.
   const active = () => state.status === 'active' || state.status === 'trialing' || onCredits();
-  const config = (family?: string) => {
+  const config = (family?: string, scope?: Scope) => {
     const m = state.managed;
     const own = m.browserSites as { sites?: Record<string, { enabled: boolean }>; customSites?: Custom[] } | undefined;
     const ownOn = Boolean(own && (Object.values(own.sites ?? {}).some((x) => x.enabled) || (own.customSites ?? []).some((c) => c.enabled)));
@@ -296,7 +296,10 @@ export function cloudRouter(): express.Router {
     const count = [...seen].filter((f) => !ended.has(f)).length;
     const extras = { ...(family && seen.has(family) ? { browserVersion } : {}), browsers: count };
     const etag = !on ? `"${m.version}-off-c${count}"` : browserVersion ? `"${m.version}-b${browserVersion}-c${count}"` : `"${m.version}-c${count}"`;
-    return { etag, body: on ? { ...extras, version: Math.max(1, m.version), managed: true, sites: m.sites, customSites: m.customSites, updatedAt: new Date().toISOString(), ...levels } : { ...extras, version: m.version, managed: false } };
+    const body = on ? { ...extras, version: Math.max(1, m.version), managed: true, sites: m.sites, customSites: m.customSites, updatedAt: new Date().toISOString(), ...levels } : { ...extras, version: m.version, managed: false };
+    // The sign-in the answer was made for and its token's scope, from the token checked (the extension's cloud-sync.ts
+    // trusts these, not what it stores).
+    return { etag, body: family ? { ...body, family, scope: scope ?? 'full' } : body };
   };
   r.get('/v1/config', auth, (req, res) => {
     // The poll is the browser's check-in too.
@@ -304,9 +307,9 @@ export function cloudRouter(): express.Router {
     browserRaw = raw;
     browser = parseBrowser(raw);
     if (state.noConfig) { res.status(404).json({ error: 'not_found' }); return; }
-    const family = (res.locals.token as { family: string }).family;
+    const { family, scope } = res.locals.token as { family: string; scope: Scope };
     seen.add(family);
-    const { etag, body } = config(family);
+    const { etag, body } = config(family, scope);
     res.set('cache-control', 'no-store').set('etag', etag);
     if (req.headers['if-none-match'] === etag) { res.status(304).end(); return; }
     res.json(body);
@@ -348,7 +351,7 @@ export function cloudRouter(): express.Router {
       if (next.customSites.length > 100) { res.status(400).json({ error: 'too-many' }); return; }
       if (JSON.stringify(next) !== JSON.stringify(state.managed)) state.managed = { ...next, version: state.managed.version + 1 };
     }
-    const { etag, body } = config(family);
+    const { etag, body } = config(family, (res.locals.token as { scope: Scope }).scope);
     res.set('cache-control', 'no-store').set('etag', etag).json(body);
   });
 
