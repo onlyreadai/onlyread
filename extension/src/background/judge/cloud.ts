@@ -86,11 +86,14 @@ export interface BrowserInfo {
   /** The AI agent that said it runs this browser, on the agent-setup page, and the name it gave it. */
   agent?: string;
   name?: string;
+  /** "Guard every site" is in force here (any level: this browser's own switch, which the account cannot see, or the
+   *  account's). Sent only when on, so OnlyRead Pro does not tell a person who guards everything to pick a first site. */
+  guardAll?: boolean;
 }
 
 /** The header's value: compact JSON, keys in this order. */
 export function browserHeader(b: BrowserInfo): string {
-  return JSON.stringify({ platform: b.platform, sites: b.sites, version: b.version, ...(b.agent ? { agent: b.agent } : {}), ...(b.name ? { name: b.name } : {}) });
+  return JSON.stringify({ platform: b.platform, sites: b.sites, version: b.version, ...(b.agent ? { agent: b.agent } : {}), ...(b.name ? { name: b.name } : {}), ...(b.guardAll ? { guardAll: true } : {}) });
 }
 
 /** The platform from `navigator.userAgentData.platform` ("macOS", "Windows", "Chrome OS", …), else from the user agent. */

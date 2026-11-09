@@ -6,7 +6,7 @@ import { CloudClient, CloudError, browserPlatform, pkceChallenge, randomToken, s
 import { releaseAgentBrowser } from './agent-browser';
 import { ownRemove, ownSet } from './owned-storage';
 import { RELEASE_SERVICE_URL, devBuild, devMockServiceUrl } from './policy';
-import { guardedSiteIds } from './sites';
+import { guardAllInForce, guardedSiteIds } from './sites';
 import { S, system } from './state';
 
 // The tokens are written as the background's own (owned-storage.ts): dropping them in an agent's browser is a lowering
@@ -85,9 +85,9 @@ export async function setAgentName(agent: AgentName, name?: string): Promise<voi
 }
 
 /** This browser for GET /v1/me: its platform, the sites it guards now (enabled, this browser's and the account's), the
- *  extension's version, and the agent that said it runs it. */
+ *  extension's version, the agent that said it runs it, and whether it guards every site. */
 function thisBrowser(): BrowserInfo {
-  return { platform: browserPlatform(navigator as Navigator & { userAgentData?: { platform?: string } }), sites: guardedSiteIds(S.policy).length, version: chrome.runtime.getManifest().version, ...(agentName ? { agent: agentName } : {}), ...(browserName ? { name: browserName } : {}) };
+  return { platform: browserPlatform(navigator as Navigator & { userAgentData?: { platform?: string } }), sites: guardedSiteIds(S.policy).length, version: chrome.runtime.getManifest().version, ...(agentName ? { agent: agentName } : {}), ...(browserName ? { name: browserName } : {}), ...(guardAllInForce(S.policy).on ? { guardAll: true } : {}) };
 }
 
 export function cloudClient(p: Policy = S.policy): CloudClient {

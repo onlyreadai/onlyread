@@ -242,6 +242,9 @@ describe('this browser, told to the service with GET /v1/me and GET /v1/config (
   it('keeps the keys in the contract\'s order', () => {
     expect(browserHeader({ version: '1.2.3', sites: 0, platform: 'other' } as never)).toBe('{"platform":"other","sites":0,"version":"1.2.3"}');
     expect(browserHeader({ version: '1.2.3', sites: 2, platform: 'linux', agent: 'grok' })).toBe('{"platform":"linux","sites":2,"version":"1.2.3","agent":"grok"}');
+    // "Guard every site": said only when on.
+    expect(browserHeader({ version: '1.2.3', sites: 0, platform: 'mac', guardAll: true })).toBe('{"platform":"mac","sites":0,"version":"1.2.3","guardAll":true}');
+    expect(browserHeader({ version: '1.2.3', sites: 0, platform: 'mac', guardAll: false })).toBe('{"platform":"mac","sites":0,"version":"1.2.3"}');
   });
 
   it('reads the platform from userAgentData, else the user agent', () => {
