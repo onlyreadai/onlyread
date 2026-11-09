@@ -1,6 +1,6 @@
 {
   "name": "onlyread",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Read-only mode for browser AI agents: a Chrome extension that refuses writes on the sites you guard, and the harness that measures it",
   "keywords": [
     "ai-agent",
