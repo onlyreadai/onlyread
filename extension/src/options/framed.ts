@@ -1,8 +1,9 @@
 // The settings page framed on the OnlyRead Pro account page (content/account-frames.ts): options.html?framed=1#<section>
 // shows that one section, with no header, sidebar or footer, at the frame's width. It shows anything only when the page
 // framing it is the configured Pro service (`location.ancestorOrigins`, which a page cannot set); anywhere else, or
-// opened on its own, it stays blank. It tells that page its height, and when a dialog opens (a report, the PIN), so
-// the page can scroll it into view.
+// opened on its own, it stays blank. It tells that page its height, and when a dialog opens and closes (a report, the
+// PIN): while one is open the page has the frame cover its whole window, and tells it where the section's spot is, so
+// the section is drawn there still and the dialog is the window's, centred, the whole page dimmed behind it.
 
 import { applyTheme, normalizeTheme, type Theme } from '../shared/theme';
 
@@ -30,10 +31,39 @@ export function enterFramed(section: string): void {
   // stays blank anyway unless the framing page is the service's (allowFrame).
   addEventListener('message', (e: MessageEvent) => {
     if (e.source !== window.parent) return;
-    const d = e.data as { source?: unknown; theme?: unknown } | null;
-    if (d?.source === 'onlyread-page' && d.theme !== undefined) applyTheme(normalizeTheme(d.theme));
+    const d = e.data as { source?: unknown; theme?: unknown; cover?: unknown } | null;
+    if (d?.source !== 'onlyread-page') return;
+    if (d.theme !== undefined) applyTheme(normalizeTheme(d.theme));
+    const c = coverFrom(d.cover);
+    if (c !== undefined) showCover(c);
   });
 }
+
+/** Where the section's spot is on the account page while the frame covers the window ({x, y, width}, in the window's
+ *  pixels), null once it no longer covers it; undefined for anything else. */
+export function coverFrom(v: unknown): { x: number; y: number; width: number } | null | undefined {
+  if (v === null) return null;
+  if (typeof v !== 'object' || v === undefined) return undefined;
+  const { x, y, width } = v as Record<string, unknown>;
+  const num = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n);
+  return num(x) && num(y) && num(width) && width > 0 ? { x, y, width } : undefined;
+}
+
+/** Covering the window, the section stays where it was on the page (framed.css `framed-cover`), and an open dialog
+ *  shows (until then it waits, `framed-wait`, so it never pops in clipped to the section's small frame). */
+function showCover(c: { x: number; y: number; width: number } | null): void {
+  const html = document.documentElement;
+  clearTimeout(waitTimer);
+  html.classList.remove('framed-wait');
+  html.classList.toggle('framed-cover', c !== null);
+  if (!c) return;
+  html.style.setProperty('--cover-x', `${c.x}px`);
+  html.style.setProperty('--cover-y', `${c.y}px`);
+  html.style.setProperty('--cover-w', `${c.width}px`);
+}
+let waitTimer: ReturnType<typeof setTimeout> | undefined;
+/** How long an opened dialog waits for the page to cover the window before it shows anyway, in the frame as it is. */
+const COVER_WAIT_MS = 400;
 
 /** Whether `ancestors` is exactly the Pro service's page: one ancestor, the service's origin. */
 export function framedByService(ancestors: ArrayLike<string>, serviceUrl: string): boolean {
@@ -56,9 +86,20 @@ export function allowFrame(serviceUrl: string): boolean {
   const report = () => post({ height: Math.ceil(page.getBoundingClientRect().height) });
   new ResizeObserver(report).observe(page);
   report();
-  // A dialog opened in the frame is drawn near the frame's top (framed.css): the page scrolls the frame into view.
-  for (const d of document.querySelectorAll('dialog')) {
-    new MutationObserver(() => { if (d.open) post({ dialog: true }); }).observe(d, { attributes: true, attributeFilter: ['open'] });
-  }
+  // A dialog opened in the frame: the page has the frame cover its window until no dialog is open.
+  const dialogs = [...document.querySelectorAll('dialog')];
+  let open = false;
+  const watch = () => {
+    const now = dialogs.some((d) => d.open);
+    if (now === open) return;
+    open = now;
+    if (now && !document.documentElement.classList.contains('framed-cover')) {
+      document.documentElement.classList.add('framed-wait');
+      clearTimeout(waitTimer);
+      waitTimer = setTimeout(() => document.documentElement.classList.remove('framed-wait'), COVER_WAIT_MS);
+    }
+    post({ dialog: now });
+  };
+  for (const d of dialogs) new MutationObserver(watch).observe(d, { attributes: true, attributeFilter: ['open'] });
   return true;
 }

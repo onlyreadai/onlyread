@@ -68,6 +68,45 @@ test('signed in, the account\'s page frames Activity and Security, sized to thei
   await page.close();
 });
 
+// A dialog in the framed section (the report, the PIN) is the window's, however short the section: while it is open the
+// frame covers the page's whole window, its spot on the page keeping its height and the section drawn there still;
+// closed, the frame is back in its spot at its own height.
+test('a dialog opened in the framed section covers the whole window, and the frame goes back when it closes', async () => {
+  const page = await h.ctx.newPage();
+  await page.setViewportSize({ width: 1200, height: 800 });
+  await page.goto(framesPage('test.user@example.com'));
+  await expect.poll(() => state(page, 'activity')).toBe('framed');
+  const inner = page.frameLocator('#activity iframe');
+  await expect(inner.locator('#activity')).toBeVisible({ timeout: 10_000 });
+  const iframe = page.locator('#activity iframe');
+  const spot = page.locator('#activity');
+  await expect.poll(async () => iframe.evaluate((f) => (f as HTMLIFrameElement).style.height)).not.toBe('240px');
+  const frame = page.frames().find((f) => f.url().includes('options.html?framed=1'))!;
+  // The section's entrance animation over: no finite animation left running in the frame.
+  await expect.poll(() => frame.evaluate(() => document.getAnimations().filter((a) => a.playState === 'running' && a.effect?.getComputedTiming().endTime !== Infinity).length)).toBe(0);
+  const before = { frame: await iframe.boundingBox(), spot: await spot.boundingBox(), height: await iframe.evaluate((f) => (f as HTMLIFrameElement).style.height) };
+  const section = await inner.locator('#activity').boundingBox();
+
+  await frame.evaluate(() => (document.getElementById('report-dialog') as HTMLDialogElement).showModal());
+  // The frame is the window, the spot keeps its height, the section is drawn where it was, the dialog in the window's middle.
+  await expect.poll(async () => iframe.boundingBox()).toEqual({ x: 0, y: 0, width: 1200, height: 800 });
+  expect((await spot.boundingBox())!.height).toBeCloseTo(before.spot!.height, 0);
+  await expect.poll(async () => inner.locator('#activity').boundingBox()).toEqual(section);
+  const dialog = inner.locator('#report-dialog');
+  await expect(dialog).toBeVisible();
+  await expect.poll(() => dialog.evaluate((d) => getComputedStyle(d).opacity)).toBe('1');
+  const box = (await dialog.boundingBox())!;
+  expect(Math.abs(box.x + box.width / 2 - 600)).toBeLessThan(2);
+  expect(Math.abs(box.y + box.height / 2 - 400)).toBeLessThan(2);
+
+  await frame.evaluate(() => (document.getElementById('report-dialog') as HTMLDialogElement).close());
+  await expect.poll(async () => iframe.boundingBox()).toEqual(before.frame);
+  expect(await iframe.evaluate((f) => (f as HTMLIFrameElement).style.height)).toBe(before.height);
+  await expect.poll(async () => inner.locator('#activity').boundingBox()).toEqual(section);
+  expect(await spot.evaluate((el) => (el as HTMLElement).style.minHeight)).toBe('');
+  await page.close();
+});
+
 // The account page's "Try the demo" (in Pro mode this browser's own settings page is out of the way): a real click opens
 // the demo's choice of site; the page's own script clicking it, or a button naming another account, opens nothing.
 test('the account page\'s "Try the demo" opens the demo\'s choice of site, on a real click for this account only', async () => {
