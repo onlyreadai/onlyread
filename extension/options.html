@@ -396,8 +396,8 @@
   .row.enter { animation: rise .4s var(--spring) both, flash 1.6s ease-out; }
   /* Framed on the Pro account page (options/framed.ts): blank until the framing page is known to be Pro's, then one
      section at the frame's width, on the page's own background. With a dialog open the frame covers the page's whole
-     window (framed-cover): the section stays drawn at its spot on the page, the dialog centred in the window. Until
-     the page has covered it (framed-wait) the dialog and its backdrop wait unseen, then come in. */
+     window (framed-cover): the section stays drawn at its spot on the page (framed.ts coverRule), the dialog centred in
+     the window. Until the frame is the window's size (framed-wait) the dialog and its backdrop wait unseen, then come in. */
   /* Pro mode, Pro reachable: the account page manages this browser; only the AI judge stays here. */
   html.pro-mode .content > section:not(#pro-managed):not(#ai-judge), html.pro-mode .side a { display: none; }
   /* The menu column keeps only the logo and the appearance switch, as one line above the card. */
@@ -466,7 +466,6 @@
   html.framed .card { box-shadow: none; }
   html.framed .shell { display: block; }
   html.framed .framed-target > header { display: none; }
-  html.framed-cover .page { position: fixed; top: var(--cover-y); left: var(--cover-x); width: var(--cover-w); box-sizing: border-box; }
   html.framed-wait dialog[open], html.framed-wait dialog[open]::backdrop { opacity: 0; animation: none; }
   @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
 </style>

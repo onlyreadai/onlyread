@@ -9,6 +9,9 @@
 // The frame reports its height (options/framed.ts). While it has a dialog open (a report, the PIN) it covers the whole
 // window, so the dialog and its dimmed backdrop are the page's whole width and height, however short the section is:
 // its spot on the page keeps its height, and the frame is told where that spot is to draw the section there still.
+// The frame is told first, with the window's size, and says when it is ready; only then does it grow. It draws the
+// section at the spot by a media query on that size, so the section stays put in the very paint the frame grows or
+// shrinks in (the frame paints in another process: a message would land a frame or more later, the section flashing).
 
 /** The sections the account page may frame. */
 const SECTIONS = new Set(['activity', 'security']);
@@ -54,42 +57,67 @@ async function frame(el: HTMLElement): Promise<void> {
   new MutationObserver(sendTheme).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
   // The content's height, as the frame last told it; applied once the frame no longer covers the window.
   let height = '240px';
-  // Covering the window: the spot's height kept as it was (the frame out of the page's flow), and its min-height before.
+  // A dialog open in the frame (it asked to cover the window), and whether the frame does cover it yet: the spot's
+  // height kept as it was (the frame out of the page's flow), and the spot's min-height before.
+  let wanted = false;
   let covered: { minHeight: string } | undefined;
+  // Where the spot is and the window's size, as last sent; re-sent whenever either changes (a scroll, a resize, the
+  // page moving the spot) while a dialog is open.
+  let sent = '';
+  let tracking = 0;
   const sendCover = () => {
     const r = el.getBoundingClientRect();
-    iframe.contentWindow?.postMessage({ source: 'onlyread-page', cover: { x: r.left, y: r.top, width: r.width } }, origin);
+    const root = document.documentElement;
+    const cover = { x: r.left, y: r.top, width: r.width, vw: root.clientWidth, vh: root.clientHeight };
+    const key = JSON.stringify(cover);
+    if (key === sent) return;
+    sent = key;
+    iframe.contentWindow?.postMessage({ source: 'onlyread-page', cover }, origin);
   };
-  const cover = () => {
-    if (!covered) {
-      covered = { minHeight: el.style.minHeight };
-      el.style.minHeight = `${iframe.getBoundingClientRect().height}px`;
-      for (const [k, v] of COVER) iframe.style.setProperty(k, v);
-      addEventListener('resize', sendCover);
-    }
+  const track = () => {
+    // The frame gone for good (the page dropped it past MAX_RESTORES): nothing is left to cover, so let go.
+    if (!iframe.isConnected) { uncover(); return; }
     sendCover();
+    tracking = requestAnimationFrame(track);
+  };
+  const want = () => {
+    if (wanted) return;
+    wanted = true;
+    sent = '';
+    track();
+  };
+  // The frame is ready (it knows the spot and the window's size): it grows to the window.
+  const cover = () => {
+    if (!wanted || covered) return;
+    covered = { minHeight: el.style.minHeight };
+    el.style.minHeight = `${iframe.getBoundingClientRect().height}px`;
+    for (const [k, v] of COVER) iframe.style.setProperty(k, v);
   };
   const uncover = () => {
-    if (!covered) return;
-    for (const [k] of COVER) iframe.style.removeProperty(k);
-    iframe.style.height = height;
-    el.style.minHeight = covered.minHeight;
-    covered = undefined;
-    removeEventListener('resize', sendCover);
+    if (!wanted) return;
+    wanted = false;
+    cancelAnimationFrame(tracking);
+    if (covered) {
+      for (const [k] of COVER) iframe.style.removeProperty(k);
+      iframe.style.height = height;
+      el.style.minHeight = covered.minHeight;
+      covered = undefined;
+    }
     iframe.contentWindow?.postMessage({ source: 'onlyread-page', cover: null }, origin);
   };
   // A frame loaded afresh has no dialog open.
   iframe.addEventListener('load', uncover);
   addEventListener('message', (e: MessageEvent) => {
     if (e.source !== iframe.contentWindow || e.origin !== origin) return;
-    const d = e.data as { source?: unknown; height?: unknown; dialog?: unknown } | null;
+    const d = e.data as { source?: unknown; height?: unknown; dialog?: unknown; ready?: unknown } | null;
     if (d?.source !== 'onlyread-frame') return;
     if (typeof d.height === 'number' && Number.isFinite(d.height) && d.height > 0) {
       height = `${Math.min(Math.ceil(d.height), 20_000)}px`;
       if (!covered) iframe.style.height = height;
     }
-    if (d.dialog === true) cover();
+    if (d.dialog === true) want();
     else if (d.dialog === false) uncover();
+    if (d.ready === true) cover();
   });
   el.replaceChildren(iframe);
   el.setAttribute(DONE, 'framed');

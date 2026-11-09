@@ -70,7 +70,7 @@ test('signed in, the account\'s page frames Activity and Security, sized to thei
 
 // A dialog in the framed section (the report, the PIN) is the window's, however short the section: while it is open the
 // frame covers the page's whole window, its spot on the page keeping its height and the section drawn there still;
-// closed, the frame is back in its spot at its own height.
+// the section follows its spot as the page scrolls; closed, the frame is back in its spot at its own height.
 test('a dialog opened in the framed section covers the whole window, and the frame goes back when it closes', async () => {
   const page = await h.ctx.newPage();
   await page.setViewportSize({ width: 1200, height: 800 });
@@ -81,7 +81,7 @@ test('a dialog opened in the framed section covers the whole window, and the fra
   const iframe = page.locator('#activity iframe');
   const spot = page.locator('#activity');
   await expect.poll(async () => iframe.evaluate((f) => (f as HTMLIFrameElement).style.height)).not.toBe('240px');
-  const frame = page.frames().find((f) => f.url().includes('options.html?framed=1'))!;
+  const frame = (await (await iframe.elementHandle())!.contentFrame())!; // Activity's, not Security's
   // The section's entrance animation over: no finite animation left running in the frame.
   await expect.poll(() => frame.evaluate(() => document.getAnimations().filter((a) => a.playState === 'running' && a.effect?.getComputedTiming().endTime !== Infinity).length)).toBe(0);
   const before = { frame: await iframe.boundingBox(), spot: await spot.boundingBox(), height: await iframe.evaluate((f) => (f as HTMLIFrameElement).style.height) };
@@ -98,6 +98,12 @@ test('a dialog opened in the framed section covers the whole window, and the fra
   const box = (await dialog.boundingBox())!;
   expect(Math.abs(box.x + box.width / 2 - 600)).toBeLessThan(2);
   expect(Math.abs(box.y + box.height / 2 - 400)).toBeLessThan(2);
+
+  // The page scrolled under the open dialog (a wheel over the dimmed page): the section moves with its spot.
+  await page.evaluate(() => { document.body.style.paddingBottom = '2000px'; scrollBy(0, 120); });
+  await expect.poll(async () => (await inner.locator('#activity').boundingBox())!.y).toBeCloseTo(section!.y - 120, 0);
+  await page.evaluate(() => { scrollTo(0, 0); document.body.style.paddingBottom = ''; });
+  await expect.poll(async () => inner.locator('#activity').boundingBox()).toEqual(section);
 
   await frame.evaluate(() => (document.getElementById('report-dialog') as HTMLDialogElement).close());
   await expect.poll(async () => iframe.boundingBox()).toEqual(before.frame);
