@@ -1,12 +1,12 @@
 // Support reports: the person picks refusals from the activity log on the settings page and sends them, with a note,
 // to OnlyRead support (POST /v1/support). Nothing is sent without that click, and what is sent is what the page shows:
 // the log's entries with their addresses masked here (secret-named query values, token-like runs) and their body
-// previews as the log keeps them (already redacted when recorded, at most 2 KB). Pure: the log, the sites and the
-// settings in.
+// previews as the log keeps them (already redacted when recorded, at most 2 KB), a body of bytes named as one instead
+// (BINARY_PREVIEW). Pure: the log, the sites and the settings in.
 import type { AuditEntry, Policy, SiteView, SupportItem, SupportList, SupportReport, SupportRequest } from '../shared/types';
 import { operationName, stoppedBy } from '../shared/refusals';
 import { entryKey, isRefusal } from './activity';
-import { isTargetHost } from './decision';
+import { binaryBody, isTargetHost } from './decision';
 import { SECRET_KEY, redactTokens } from './fingerprint';
 import { guardedSiteIds } from './sites';
 
@@ -15,6 +15,21 @@ export const SUPPORT_MAX = 50;
 const NOTE_MAX = 2000;
 const EMAIL_MAX = 200;
 const PREVIEW_MAX = 2048;
+/** What a report carries in place of a body of bytes (gzip, an encrypted protocol): nothing anyone could read, and
+ *  text the service can store (Postgres refuses the NUL such a body holds). */
+export const BINARY_PREVIEW = '[binary body, not shown]';
+/** Half an emoji: a surrogate without its pair, as cutting a string to a length can leave one. */
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
+
+/** Text cut to `max` that the service can store: Postgres refuses NUL and half an emoji, so each becomes U+FFFD. */
+function storable(text: string, max: number): string {
+  return text.slice(0, max).replaceAll('\0', '\uFFFD').replace(LONE_SURROGATE, '\uFFFD');
+}
+
+/** A body preview as a report carries it: a body of bytes named as one, else the log's text made storable. */
+function reportPreview(preview: string): string {
+  return binaryBody(preview) ? BINARY_PREVIEW : storable(preview, PREVIEW_MAX);
+}
 
 /** The address with secret-named query values replaced, and token-like runs (ids that work as keys) masked in each
  *  path segment and query value; the host stays. */
@@ -36,14 +51,14 @@ export function supportRequest(e: AuditEntry): SupportRequest {
   const r: SupportRequest = { ts: e.ts, method: e.method, url: maskUrl(e.url), verdict: e.verdict, source: e.source, reason: e.reason };
   if (typeof e.pWrite === 'number') r.pWrite = e.pWrite;
   if (e.judgeModel) r.judgeModel = e.judgeModel;
-  if (e.judgeReason) r.judgeReason = e.judgeReason.slice(0, 300);
-  if (e.fingerprint) r.fingerprint = redactTokens(e.fingerprint);
+  if (e.judgeReason) r.judgeReason = storable(e.judgeReason, 300);
+  if (e.fingerprint) r.fingerprint = storable(redactTokens(e.fingerprint), Infinity);
   if (e.contentType) r.contentType = e.contentType;
-  if (e.bodyShape) r.bodyShape = e.bodyShape;
-  if (e.bodyPreview) r.bodyPreview = e.bodyPreview.slice(0, PREVIEW_MAX);
+  if (e.bodyShape) r.bodyShape = storable(e.bodyShape, Infinity); // a body's own keys, and those can hold NUL
+  if (e.bodyPreview) r.bodyPreview = reportPreview(e.bodyPreview);
   // What was clicked, the three actions nearest the request (the list is newest first): the element and its visible
   // name, not the addresses or field names the action also notes.
-  if (e.lastUiActions?.length) r.lastUiActions = e.lastUiActions.slice(0, 3).map((a) => ({ type: a.type, tag: a.tag, ...(a.role ? { role: a.role } : {}), ...(a.name ? { name: a.name.slice(0, 80) } : {}) }));
+  if (e.lastUiActions?.length) r.lastUiActions = e.lastUiActions.slice(0, 3).map((a) => ({ type: a.type, tag: a.tag, ...(a.role ? { role: a.role } : {}), ...(a.name ? { name: storable(a.name, 80) } : {}) }));
   return r;
 }
 
@@ -59,7 +74,7 @@ export function supportContext(p: Policy, version: string, dev: boolean, userAge
       version, build: dev ? 'development' : 'release', mode: p.mode, attachWhen: p.attachWhen,
       judge: p.judge.provider, readTracking: Boolean(p.allowReadTracking), sites: guardedSiteIds(p),
     },
-    userAgent: userAgent.slice(0, 300),
+    userAgent: storable(userAgent, 300),
   };
 }
 
@@ -104,7 +119,7 @@ export function buildReport(items: SupportItem[], keys: string[], context: Suppo
   const picked = new Set(keys);
   const requests = items.filter((i) => picked.has(i.key)).map((i) => i.request);
   if (!requests.length) return { error: 'Pick at least one refused request.' };
-  const n = typeof note === 'string' ? note.trim().slice(0, NOTE_MAX) : '';
+  const n = typeof note === 'string' ? storable(note.trim(), NOTE_MAX) : '';
   const e = cleanEmail(email);
   if (email?.trim() && !e) return { error: 'That email address does not look right.' };
   return { ...(n ? { note: n } : {}), ...(e ? { email: e } : {}), ...context, requests };

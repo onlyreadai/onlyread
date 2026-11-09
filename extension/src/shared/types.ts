@@ -358,7 +358,8 @@ export interface AuditEntry {
 }
 
 /** One refused request in a support report: the activity log's entry with its address masked (secret-named query
- *  values and token-like runs) and its body preview as the log already keeps it (redacted, at most 2 KB). */
+ *  values and token-like runs) and its body preview as the log already keeps it (redacted, at most 2 KB), a body of
+ *  bytes named as one (support.ts BINARY_PREVIEW) and a NUL or half an emoji as U+FFFD (support.ts storable). */
 export interface SupportRequest {
   ts: number;
   method: string;

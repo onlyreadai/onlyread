@@ -115,12 +115,15 @@ Send to Support, and the dialog shows the report exactly as it will go. A report
   seconds of it: for each one its time, method and address (secret-named query values and token-like runs
   masked, other query values kept), its verdict and what decided it (the source, the reason, and the judge's
   model, score and sentence), its fingerprint, content type, body shape and body preview (as the log keeps it:
-  already redacted, at most 2 KB), and the three interface actions nearest to it (type, element, role and visible
-  name),
+  already redacted, at most 2 KB; a compressed or binary body goes as "[binary body, not shown]"), and the
+  three interface actions nearest to it (type, element, role and visible name),
 - the extension's version and build, its mode, when it protects, the judge provider, the read-tracking
   setting and the ids of the guarded sites,
 - the browser's user agent,
 - your note, and an email address only if you type one.
+
+In what comes from the page (the fingerprint, body shape, body preview, judge's sentence and clicked names),
+your note and the user agent, a character that cannot be stored, such as a null or half an emoji, goes as "�".
 
 It goes to the OnlyRead Pro service whichever judge you use: with your Pro sign-in if you are signed in, so
 support can see the account, and anonymously otherwise. The body preview can contain personal data from the

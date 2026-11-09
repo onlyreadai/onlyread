@@ -663,11 +663,14 @@ sentence), its fingerprint, body shape and body preview, and the last clicks bef
 name only), plus the extension's version and build, mode, when it protects, the judge provider, read tracking and the
 guarded site ids, and the browser's user agent (`background/support.ts`). Addresses are masked before they are shown:
 secret-named query values and token-like runs in each path segment and query value. Body previews are the log's own,
-already redacted when recorded (secret-named keys, token-like runs, card numbers, typed secrets) and at most 2 KB. It
-goes to `POST /v1/support` on `cloud.serviceUrl` whatever the judge provider: with the Pro sign-in when there is one,
-so support sees the account, and anonymously otherwise (an expired sign-in is refreshed, and one the service no longer
-knows is sent without, never signed out over a report). The answer is the report's number, shown to the person. Too
-many reports from one place in an hour are refused (`rate_limited`).
+already redacted when recorded (secret-named keys, token-like runs, card numbers, typed secrets) and at most 2 KB. A
+body of bytes (gzip, an encrypted protocol: `decision.ts binaryBody`) goes as `[binary body, not shown]`, and in any
+text the report carries from the log or the page (preview, fingerprint, body shape, judge's sentence, clicked names,
+note, user agent) a NUL or half an emoji becomes U+FFFD, since the service's Postgres refuses both (`support.ts
+storable`). It goes to `POST /v1/support` on `cloud.serviceUrl` whatever the judge provider: with the Pro sign-in when
+there is one, so support sees the account, and anonymously otherwise (an expired sign-in is refreshed, and one the
+service no longer knows is sent without, never signed out over a report). The answer is the report's number, shown to
+the person. Too many reports from one place in an hour are refused (`rate_limited`).
 
 ## OnlyRead Pro
 
