@@ -93,6 +93,18 @@ test('a dialog opened in the framed section covers the whole window, follows a s
   await f.page.close();
 });
 
+// The spot measured from the frame itself, not the placeholder around it: padded or bordered by the account page, the
+// section still stays where it was and the dialog still waits for the cover.
+test('with the placeholder padded and bordered, a dialog covers the window and the section stays in place', async () => {
+  const f = await openFramed(h, framesPage('test.user@example.com'), { width: 1200, height: 800 }, 'padding: 14px 30px; border: 3px solid red;');
+  await f.show();
+  await f.covering();
+  expect((await f.spot.boundingBox())!.height).toBeCloseTo(f.before.spot.height, 0);
+  await f.close();
+  await f.back();
+  await f.page.close();
+});
+
 test('a dialog closed and opened again at once covers the window as the first did', async () => {
   const f = await openFramed(h, framesPage('test.user@example.com'), { width: 1200, height: 800 });
   await f.show();

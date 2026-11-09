@@ -98,8 +98,11 @@ function onCover(c: Cover | null, seq: number | undefined): void {
 function applyCover(): void {
   coverQuery?.removeEventListener('change', covering);
   coverQuery = undefined;
-  if (!cover || !dialogOpen) return;
+  if (!cover) return;
   const slack = coverSlack(devicePixelRatio);
+  // Kept up to date after a close too, until the page says the frame is back in its spot: closing can change the
+  // section's height (a report sent), and the rule must know it before the page shrinks the frame to it.
+  if (!dialogOpen) { if (coverStyle) coverStyle.textContent = coverRule(cover, inPageHeight, slack); return; }
   if (!coverStyle) coverStyle = document.head.appendChild(document.createElement('style'));
   coverStyle.textContent = coverRule(cover, inPageHeight, slack);
   coverQuery = matchMedia(coverQueryFor(cover, inPageHeight, slack));

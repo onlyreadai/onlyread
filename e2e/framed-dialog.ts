@@ -10,8 +10,9 @@ export const near = (a: Box | null, b: Box | null, px = 1) =>
   !!a && !!b && (['x', 'y', 'width', 'height'] as const).every((k) => Math.abs(a[k] - b[k]) <= px);
 
 /** The account page (`url`, the mock's /__frames) with Activity framed and settled. `size`: the viewport's; none, the
- *  window's own (a Harness started with windowViewport, at the screen's scaling). */
-export async function openFramed(h: Harness, url: string, size?: { width: number; height: number }) {
+ *  window's own (a Harness started with windowViewport, at the screen's scaling). `spotStyle`: the placeholder's own
+ *  style, as the account page might give it (padding, a border). */
+export async function openFramed(h: Harness, url: string, size?: { width: number; height: number }, spotStyle?: string) {
   const page = await h.ctx.newPage();
   const cdp = await page.context().newCDPSession(page);
   const { windowId } = await cdp.send('Browser.getWindowForTarget');
@@ -28,6 +29,7 @@ export async function openFramed(h: Harness, url: string, size?: { width: number
   const iframe = page.locator('#activity iframe');
   const spot = page.locator('#activity');
   const frame = (await (await iframe.elementHandle())!.contentFrame())!; // Activity's, not Security's
+  if (spotStyle) await spot.evaluate((el, css) => { (el as HTMLElement).style.cssText = css; }, spotStyle);
   // The frame sized to its content, as it told the page.
   await expect.poll(async () => (await iframe.evaluate((f) => (f as HTMLIFrameElement).style.height)) ===
     `${await frame.evaluate(() => Math.ceil(document.querySelector('.page')!.getBoundingClientRect().height))}px`).toBe(true);

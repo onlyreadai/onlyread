@@ -75,12 +75,25 @@ async function frame(el: HTMLElement): Promise<void> {
   let sentAt = 0;
   let asks = 0;
   let firstAsk = 0;
-  let tracking = 0;
+  // The next check: every animation frame, or once a second while the frame is taken for stuck (no use drawing frames
+  // for a dead one until the page is left).
+  let stalled = false;
+  let stopTracking = () => {};
+  // Where the frame sits inside its spot (the placeholder's padding and border, if the page ever gives it any): measured
+  // from the frame itself while it is in the page, and kept for while it covers the window and only the spot is left.
+  let inset = { x: 0, y: 0, width: 0 };
+  const spot = () => {
+    const s = el.getBoundingClientRect();
+    if (!covered) {
+      const f = iframe.getBoundingClientRect();
+      inset = { x: f.left - s.left, y: f.top - s.top, width: s.width - f.width };
+    }
+    return { x: s.left + inset.x, y: s.top + inset.y, width: s.width - inset.width };
+  };
   const sendCover = () => {
     const now = performance.now();
-    if (covered && asks >= COVER_STALL_ASKS && now - firstAsk > COVER_STALL_MS) shrink();
-    const r = el.getBoundingClientRect();
-    const cover = { x: r.left, y: r.top, width: r.width };
+    if (covered && asks >= COVER_STALL_ASKS && now - firstAsk > COVER_STALL_MS) { shrink(); stalled = true; }
+    const cover = spot();
     const key = JSON.stringify(cover);
     if (key === sent && now - sentAt < COVER_RESEND_MS) return;
     sent = key;
@@ -92,7 +105,9 @@ async function frame(el: HTMLElement): Promise<void> {
     // The frame gone for good (the page dropped it past MAX_RESTORES): nothing is left to cover, so let go.
     if (!iframe.isConnected) { uncover(); return; }
     sendCover();
-    if (wanted) tracking = requestAnimationFrame(track);
+    if (!wanted) return;
+    if (stalled) { const t = setTimeout(track, COVER_RESEND_MS); stopTracking = () => clearTimeout(t); }
+    else { const t = requestAnimationFrame(track); stopTracking = () => cancelAnimationFrame(t); }
   };
   const want = () => {
     if (wanted) return;
@@ -100,15 +115,20 @@ async function frame(el: HTMLElement): Promise<void> {
     seq++;
     sent = '';
     asks = 0;
+    stalled = false;
     track();
   };
-  // The frame is ready for this dialog (it knows the spot): it grows to the window.
+  // The frame is ready for this dialog (it knows the spot): it grows to the window, and is checked every frame again
+  // if it had been taken for stuck.
   const ready = (n: number) => {
     if (!wanted || n !== seq) return;
     asks = 0;
+    if (stalled) { stalled = false; stopTracking(); track(); }
     if (covered) return;
+    const s = el.getBoundingClientRect();
     covered = { minHeight: el.style.minHeight };
-    el.style.minHeight = `${iframe.getBoundingClientRect().height}px`;
+    // The spot keeps its height: its own, padding and all, where its min-height counts those (border-box), else the frame's.
+    el.style.minHeight = `${getComputedStyle(el).boxSizing === 'border-box' ? s.height : iframe.getBoundingClientRect().height}px`;
     for (const [k, v] of COVER) iframe.style.setProperty(k, v);
   };
   // Back in its spot at its own height.
@@ -122,9 +142,15 @@ async function frame(el: HTMLElement): Promise<void> {
   const uncover = () => {
     if (!wanted) return;
     wanted = false;
-    cancelAnimationFrame(tracking);
+    stopTracking();
     shrink();
     iframe.contentWindow?.postMessage({ source: 'onlyread-page', cover: null }, origin);
+  };
+  // The frame's content height, as it told it: its height in the page, applied now unless it covers the window.
+  const setHeight = (h: number) => {
+    if (!Number.isFinite(h) || h <= 0) return;
+    inPageHeight = Math.min(Math.ceil(h), 20_000);
+    if (!covered) iframe.style.height = `${inPageHeight}px`;
   };
   // A frame loaded afresh has no dialog open, and numbers its dialogs from the start again.
   iframe.addEventListener('load', () => { uncover(); seq = 0; });
@@ -132,10 +158,7 @@ async function frame(el: HTMLElement): Promise<void> {
     if (e.source !== iframe.contentWindow || e.origin !== origin) return;
     const d = e.data as { source?: unknown; height?: unknown; dialog?: unknown; ready?: unknown } | null;
     if (d?.source !== 'onlyread-frame') return;
-    if (typeof d.height === 'number' && Number.isFinite(d.height) && d.height > 0) {
-      inPageHeight = Math.min(Math.ceil(d.height), 20_000);
-      if (!covered) iframe.style.height = `${inPageHeight}px`;
-    }
+    if (typeof d.height === 'number') setHeight(d.height);
     if (d.dialog === true) want();
     else if (d.dialog === false) uncover();
     if (typeof d.ready === 'number') ready(d.ready);
