@@ -9,9 +9,11 @@
 // The frame reports its height (options/framed.ts). While it has a dialog open (a report, the PIN) it covers the whole
 // window, so the dialog and its dimmed backdrop are the page's whole width and height, however short the section is:
 // its spot on the page keeps its height, and the frame is told where that spot is to draw the section there still.
-// The frame is told first, with the window's size, and says when it is ready; only then does it grow. It draws the
-// section at the spot by a media query on that size, so the section stays put in the very paint the frame grows or
-// shrinks in (the frame paints in another process: a message would land a frame or more later, the section flashing).
+// The frame is told first, with the spot and its own in-page size, and says when it is ready; only then does it grow.
+// It draws the section at the spot by a media query that holds while it is not its in-page size, so the section
+// usually moves in the very paint the frame grows or shrinks in (the frame paints in another process: a message would
+// land a frame or more later, the section flashing at the window's corner). Usually: on closing, Chrome sometimes
+// shows the frame's new size a frame before its new place, and the section sits at the window's corner for that frame.
 
 /** The sections the account page may frame. */
 const SECTIONS = new Set(['activity', 'security']);
@@ -55,40 +57,54 @@ async function frame(el: HTMLElement): Promise<void> {
   };
   iframe.addEventListener('load', sendTheme);
   new MutationObserver(sendTheme).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
-  // The content's height, as the frame last told it; applied once the frame no longer covers the window.
-  let height = '240px';
+  // The frame's height in the page: its content's, as it last told it; applied once it no longer covers the window.
+  let inPageHeight = 240;
   // A dialog open in the frame (it asked to cover the window), and whether the frame does cover it yet: the spot's
-  // height kept as it was (the frame out of the page's flow), and the spot's min-height before.
+  // height kept as it was (the frame out of the page's flow), and the spot's min-height before. Each dialog opened is
+  // numbered (seq), and the frame's ready answers name the number, so an answer meant for one closed since never grows
+  // the frame for the next.
   let wanted = false;
   let covered: { minHeight: string } | undefined;
-  // Where the spot is and the window's size, as last sent; re-sent whenever either changes (a scroll, a resize, the
-  // page moving the spot) while a dialog is open.
+  let seq = 0;
+  // Where the spot is and the frame's in-page size, as last sent; re-sent whenever either changes (a scroll, a resize,
+  // the page moving the spot, the section's height) while a dialog is open, and every second anyway: the frame answers
+  // each one, and one left unanswered for COVER_STALL_MS means the frame is gone (crashed, hung), so the cover is let go
+  // rather than leaving the whole page under a dead frame.
   let sent = '';
+  let sentAt = 0;
+  let unanswered = 0;
   let tracking = 0;
   const sendCover = () => {
+    const now = performance.now();
+    if (unanswered && now - unanswered > COVER_STALL_MS) { uncover(); return; }
     const r = el.getBoundingClientRect();
-    const root = document.documentElement;
-    const cover = { x: r.left, y: r.top, width: r.width, vw: root.clientWidth, vh: root.clientHeight };
+    const cover = { x: r.left, y: r.top, width: r.width, height: inPageHeight };
     const key = JSON.stringify(cover);
-    if (key === sent) return;
+    if (key === sent && now - sentAt < COVER_RESEND_MS) return;
     sent = key;
-    iframe.contentWindow?.postMessage({ source: 'onlyread-page', cover }, origin);
+    sentAt = now;
+    if (!unanswered) unanswered = now;
+    iframe.contentWindow?.postMessage({ source: 'onlyread-page', cover, seq }, origin);
   };
   const track = () => {
     // The frame gone for good (the page dropped it past MAX_RESTORES): nothing is left to cover, so let go.
     if (!iframe.isConnected) { uncover(); return; }
     sendCover();
-    tracking = requestAnimationFrame(track);
+    if (wanted) tracking = requestAnimationFrame(track);
   };
   const want = () => {
     if (wanted) return;
     wanted = true;
+    seq++;
     sent = '';
+    unanswered = 0;
     track();
   };
-  // The frame is ready (it knows the spot and the window's size): it grows to the window.
-  const cover = () => {
-    if (!wanted || covered) return;
+  // The frame is ready for this dialog (it knows the spot and its in-page size): it grows to the window.
+  const ready = (n: number) => {
+    if (!wanted || n !== seq) return;
+    unanswered = 0;
+    if (covered) return;
     covered = { minHeight: el.style.minHeight };
     el.style.minHeight = `${iframe.getBoundingClientRect().height}px`;
     for (const [k, v] of COVER) iframe.style.setProperty(k, v);
@@ -99,7 +115,7 @@ async function frame(el: HTMLElement): Promise<void> {
     cancelAnimationFrame(tracking);
     if (covered) {
       for (const [k] of COVER) iframe.style.removeProperty(k);
-      iframe.style.height = height;
+      iframe.style.height = `${inPageHeight}px`;
       el.style.minHeight = covered.minHeight;
       covered = undefined;
     }
@@ -112,12 +128,12 @@ async function frame(el: HTMLElement): Promise<void> {
     const d = e.data as { source?: unknown; height?: unknown; dialog?: unknown; ready?: unknown } | null;
     if (d?.source !== 'onlyread-frame') return;
     if (typeof d.height === 'number' && Number.isFinite(d.height) && d.height > 0) {
-      height = `${Math.min(Math.ceil(d.height), 20_000)}px`;
-      if (!covered) iframe.style.height = height;
+      inPageHeight = Math.min(Math.ceil(d.height), 20_000);
+      if (!covered) iframe.style.height = `${inPageHeight}px`;
     }
     if (d.dialog === true) want();
     else if (d.dialog === false) uncover();
-    if (d.ready === true) cover();
+    if (typeof d.ready === 'number') ready(d.ready);
   });
   el.replaceChildren(iframe);
   el.setAttribute(DONE, 'framed');
@@ -147,6 +163,11 @@ const FRAME_SCHEME: Record<PageTheme, string> = { light: 'light', dark: 'dark', 
 const COVER: ReadonlyArray<readonly [string, string]> = [
   ['position', 'fixed'], ['inset', '0'], ['height', '100%'], ['z-index', '2147483647'], ['border-radius', '0'],
 ];
+
+/** While a dialog is open: how often the frame is asked again where its spot is, unchanged or not, and how long an ask
+ *  may go unanswered before the frame is taken for gone and the cover let go. */
+const COVER_RESEND_MS = 1000;
+const COVER_STALL_MS = 3000;
 
 /** How many times a dropped frame is put back. */
 const MAX_RESTORES = 5;

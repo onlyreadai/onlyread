@@ -31,36 +31,47 @@ export function enterFramed(section: string): void {
   // stays blank anyway unless the framing page is the service's (allowFrame).
   addEventListener('message', (e: MessageEvent) => {
     if (e.source !== window.parent) return;
-    const d = e.data as { source?: unknown; theme?: unknown; cover?: unknown } | null;
+    const d = e.data as { source?: unknown; theme?: unknown; cover?: unknown; seq?: unknown } | null;
     if (d?.source !== 'onlyread-page') return;
     if (d.theme !== undefined) applyTheme(normalizeTheme(d.theme));
     const c = coverFrom(d.cover);
-    if (c !== undefined) showCover(c);
+    if (c !== undefined) showCover(c, typeof d.seq === 'number' ? d.seq : undefined);
   });
 }
 
-/** The account page's cover message: where the section's spot is ({x, y, width}) and the window's size ({vw, vh}),
- *  in the page's pixels, while a dialog is open; null once the frame is back in its spot; undefined for anything else. */
-export type Cover = { x: number; y: number; width: number; vw: number; vh: number };
+/** The account page's cover message, while a dialog is open: where the section's spot is ({x, y, width}) and the
+ *  frame's height in the page, in the page's pixels; null once the frame is back in its spot; undefined for anything
+ *  else. The spot's width is the frame's own in the page. */
+export type Cover = { x: number; y: number; width: number; height: number };
 export function coverFrom(v: unknown): Cover | null | undefined {
   if (v === null) return null;
   if (typeof v !== 'object' || v === undefined) return undefined;
-  const { x, y, width, vw, vh } = v as Record<string, unknown>;
+  const { x, y, width, height } = v as Record<string, unknown>;
   const num = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n);
   const size = (n: unknown): n is number => num(n) && n > 0;
-  return num(x) && num(y) && size(width) && size(vw) && size(vh) ? { x, y, width, vw, vh } : undefined;
+  return num(x) && num(y) && size(width) && size(height) ? { x, y, width, height } : undefined;
 }
 
-/** The section drawn at its spot on the page, for as long as the frame is the window's size: a media query on that
- *  size, so the section moves in the same paint the frame grows or shrinks in (a message from the page would come a
- *  frame or more later, and the section would flash at the window's corner or out of its spot). */
+/** Whether the frame is anything but its size in the page, give or take a pixel: covering the window, whatever the
+ *  window's size, display scaling or zoom (an exact size would never match where a CSS pixel is a fraction of the
+ *  screen's, and would lag a window being resized). */
+export function coverQueryFor(c: Cover): string {
+  const near = (feature: string, n: number) => `(${n - COVER_SLACK_PX}px < ${feature} < ${n + COVER_SLACK_PX}px)`;
+  return `not all and ${near('width', c.width)} and ${near('height', c.height)}`;
+}
+
+/** The section drawn at its spot on the page while the frame covers the window: a media query, so the section usually
+ *  moves in the same paint the frame grows or shrinks in, where a message from the page would come a frame or more
+ *  later and the section would flash at the window's corner. Usually: on closing, Chrome sometimes shows the frame's
+ *  new size a frame before its new place, and the section sits at the window's corner for that frame. */
 export function coverRule(c: Cover): string {
-  return `@media (width: ${Math.round(c.vw)}px) and (height: ${Math.round(c.vh)}px) { html.framed-cover .page { position: fixed; top: ${c.y}px; left: ${c.x}px; width: ${c.width}px; box-sizing: border-box; } }`;
+  return `@media ${coverQueryFor(c)} { html.framed-cover .page { position: fixed; top: ${c.y}px; left: ${c.x}px; width: ${c.width}px; box-sizing: border-box; } }`;
 }
 
-/** Told where the spot is, the frame gets ready to cover the window and tells the page, which then grows it. An open
- *  dialog waits unseen (`framed-wait`) until the frame is the window's size, so it never pops in clipped. */
-function showCover(c: Cover | null): void {
+/** Told where the spot is, the frame gets ready to cover the window and tells the page (naming the dialog's number,
+ *  `seq`), which then grows it. An open dialog waits unseen (`framed-wait`) until the frame covers the window, so it
+ *  never pops in clipped. */
+function showCover(c: Cover | null, seq: number | undefined): void {
   const html = document.documentElement;
   html.classList.toggle('framed-cover', c !== null);
   coverQuery?.removeEventListener('change', covering);
@@ -73,10 +84,10 @@ function showCover(c: Cover | null): void {
   }
   if (!coverStyle) coverStyle = document.head.appendChild(document.createElement('style'));
   coverStyle.textContent = coverRule(c);
-  coverQuery = matchMedia(`(width: ${Math.round(c.vw)}px) and (height: ${Math.round(c.vh)}px)`);
+  coverQuery = matchMedia(coverQueryFor(c));
   coverQuery.addEventListener('change', covering);
   covering();
-  postToPage?.({ ready: true });
+  if (seq !== undefined) postToPage?.({ ready: seq });
 }
 function covering(): void { if (coverQuery?.matches) stopWaiting(); }
 function stopWaiting(): void {
@@ -90,6 +101,9 @@ let waitTimer: ReturnType<typeof setTimeout> | undefined;
 let postToPage: ((msg: Record<string, unknown>) => void) | undefined;
 /** How long an opened dialog waits for the frame to cover the window before it shows anyway, in the frame as it is. */
 const COVER_WAIT_MS = 400;
+/** How far the frame's size may be from its size in the page and still count as it (a CSS pixel need not be a whole
+ *  number of the screen's: the frame's size is rounded to the screen's). */
+const COVER_SLACK_PX = 1;
 
 /** Whether `ancestors` is exactly the Pro service's page: one ancestor, the service's origin. */
 export function framedByService(ancestors: ArrayLike<string>, serviceUrl: string): boolean {

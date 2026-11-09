@@ -4,6 +4,7 @@
 // service, whose /__frames page stands in for the account page.
 import { test, expect } from '@playwright/test';
 import { Harness } from './helpers';
+import { openFramed } from './framed-dialog';
 
 test.describe.configure({ mode: 'serial' });
 
@@ -70,47 +71,42 @@ test('signed in, the account\'s page frames Activity and Security, sized to thei
 
 // A dialog in the framed section (the report, the PIN) is the window's, however short the section: while it is open the
 // frame covers the page's whole window, its spot on the page keeping its height and the section drawn there still;
-// the section follows its spot as the page scrolls; closed, the frame is back in its spot at its own height.
-test('a dialog opened in the framed section covers the whole window, and the frame goes back when it closes', async () => {
-  const page = await h.ctx.newPage();
-  await page.setViewportSize({ width: 1200, height: 800 });
-  await page.goto(framesPage('test.user@example.com'));
-  await expect.poll(() => state(page, 'activity')).toBe('framed');
-  const inner = page.frameLocator('#activity iframe');
-  await expect(inner.locator('#activity')).toBeVisible({ timeout: 10_000 });
-  const iframe = page.locator('#activity iframe');
-  const spot = page.locator('#activity');
-  await expect.poll(async () => iframe.evaluate((f) => (f as HTMLIFrameElement).style.height)).not.toBe('240px');
-  const frame = (await (await iframe.elementHandle())!.contentFrame())!; // Activity's, not Security's
-  // The section's entrance animation over: no finite animation left running in the frame.
-  await expect.poll(() => frame.evaluate(() => document.getAnimations().filter((a) => a.playState === 'running' && a.effect?.getComputedTiming().endTime !== Infinity).length)).toBe(0);
-  const before = { frame: await iframe.boundingBox(), spot: await spot.boundingBox(), height: await iframe.evaluate((f) => (f as HTMLIFrameElement).style.height) };
-  const section = await inner.locator('#activity').boundingBox();
-
-  await frame.evaluate(() => (document.getElementById('report-dialog') as HTMLDialogElement).showModal());
-  // The frame is the window, the spot keeps its height, the section is drawn where it was, the dialog in the window's middle.
-  await expect.poll(async () => iframe.boundingBox()).toEqual({ x: 0, y: 0, width: 1200, height: 800 });
-  expect((await spot.boundingBox())!.height).toBeCloseTo(before.spot!.height, 0);
-  await expect.poll(async () => inner.locator('#activity').boundingBox()).toEqual(section);
-  const dialog = inner.locator('#report-dialog');
-  await expect(dialog).toBeVisible();
-  await expect.poll(() => dialog.evaluate((d) => getComputedStyle(d).opacity)).toBe('1');
-  const box = (await dialog.boundingBox())!;
-  expect(Math.abs(box.x + box.width / 2 - 600)).toBeLessThan(2);
-  expect(Math.abs(box.y + box.height / 2 - 400)).toBeLessThan(2);
-
+// the section follows its spot as the page scrolls or the window is resized; closed, the frame is back in its spot at
+// its own height. At any display scaling: the frame tells "covering" from its own size in the page, not the window's
+// exact size, which a fractional scale never matches.
+test('a dialog opened in the framed section covers the whole window, follows a scroll and a resize, and goes back when it closes', async () => {
+  const f = await openFramed(h, framesPage('test.user@example.com'), { width: 1200, height: 800 });
+  await f.show();
+  await f.covering();
+  expect((await f.spot.boundingBox())!.height).toBeCloseTo(f.before.spot.height, 0);
   // The page scrolled under the open dialog (a wheel over the dimmed page): the section moves with its spot.
-  await page.evaluate(() => { document.body.style.paddingBottom = '2000px'; scrollBy(0, 120); });
-  await expect.poll(async () => (await inner.locator('#activity').boundingBox())!.y).toBeCloseTo(section!.y - 120, 0);
-  await page.evaluate(() => { scrollTo(0, 0); document.body.style.paddingBottom = ''; });
-  await expect.poll(async () => inner.locator('#activity').boundingBox()).toEqual(section);
+  await f.page.evaluate(() => { document.body.style.paddingBottom = '2000px'; scrollBy(0, 120); });
+  expect((await f.spot.boundingBox())!.y).toBeCloseTo(f.before.spot.y - 120, 0);
+  await f.covering();
+  await f.page.evaluate(() => { scrollTo(0, 0); document.body.style.paddingBottom = ''; });
+  // The window resized under it.
+  await f.resize(1000, 700);
+  await f.covering();
+  await f.resize(1200, 800);
+  await f.close();
+  await f.back();
+  await f.page.close();
+});
 
-  await frame.evaluate(() => (document.getElementById('report-dialog') as HTMLDialogElement).close());
-  await expect.poll(async () => iframe.boundingBox()).toEqual(before.frame);
-  expect(await iframe.evaluate((f) => (f as HTMLIFrameElement).style.height)).toBe(before.height);
-  await expect.poll(async () => inner.locator('#activity').boundingBox()).toEqual(section);
-  expect(await spot.evaluate((el) => (el as HTMLElement).style.minHeight)).toBe('');
-  await page.close();
+test('a dialog closed and opened again at once covers the window as the first did', async () => {
+  const f = await openFramed(h, framesPage('test.user@example.com'), { width: 1200, height: 800 });
+  await f.show();
+  await f.covering();
+  await f.frame.evaluate(() => {
+    const d = document.getElementById('report-dialog') as HTMLDialogElement;
+    d.close();
+    setTimeout(() => d.showModal(), 0);
+  });
+  await f.page.waitForTimeout(300);
+  await f.covering();
+  await f.close();
+  await f.back();
+  await f.page.close();
 });
 
 // The account page's "Try the demo" (in Pro mode this browser's own settings page is out of the way): a real click opens
