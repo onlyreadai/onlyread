@@ -9,7 +9,7 @@
 // The frame reports its height (options/framed.ts). While it has a dialog open (a report, the PIN) it covers the whole
 // window, so the dialog and its dimmed backdrop are the page's whole width and height, however short the section is:
 // its spot on the page keeps its height, and the frame is told where that spot is to draw the section there still.
-// The frame is told first, with the spot and its own in-page size, and says when it is ready; only then does it grow.
+// The frame is told first, with the spot, and says when it is ready; only then does it grow.
 // It draws the section at the spot by a media query that holds while it is not its in-page size, so the section
 // usually moves in the very paint the frame grows or shrinks in (the frame paints in another process: a message would
 // land a frame or more later, the section flashing at the window's corner). Usually: on closing, Chrome sometimes
@@ -61,29 +61,31 @@ async function frame(el: HTMLElement): Promise<void> {
   let inPageHeight = 240;
   // A dialog open in the frame (it asked to cover the window), and whether the frame does cover it yet: the spot's
   // height kept as it was (the frame out of the page's flow), and the spot's min-height before. Each dialog opened is
-  // numbered (seq), and the frame's ready answers name the number, so an answer meant for one closed since never grows
-  // the frame for the next.
+  // numbered (seq, counted as the frame counts them), and the frame's answers name the number, so an answer meant for
+  // one closed since never grows the frame for the next.
   let wanted = false;
   let covered: { minHeight: string } | undefined;
   let seq = 0;
-  // Where the spot is and the frame's in-page size, as last sent; re-sent whenever either changes (a scroll, a resize,
-  // the page moving the spot, the section's height) while a dialog is open, and every second anyway: the frame answers
-  // each one, and one left unanswered for COVER_STALL_MS means the frame is gone (crashed, hung), so the cover is let go
-  // rather than leaving the whole page under a dead frame.
+  // Where the spot is, as last sent; re-sent whenever it changes (a scroll, a resize, the page moving the spot) while a
+  // dialog is open, and every second anyway. The frame answers each one. Asks left unanswered, COVER_STALL_ASKS of them
+  // over COVER_STALL_MS at least, mean the frame is stuck (hung, crashed): it is shrunk back to its spot rather than
+  // leave the whole page under it, and grown again if it answers after all. Counted in asks as well as time, so one long
+  // task on the page (the answer waiting behind it) never counts as the frame stuck.
   let sent = '';
   let sentAt = 0;
-  let unanswered = 0;
+  let asks = 0;
+  let firstAsk = 0;
   let tracking = 0;
   const sendCover = () => {
     const now = performance.now();
-    if (unanswered && now - unanswered > COVER_STALL_MS) { uncover(); return; }
+    if (covered && asks >= COVER_STALL_ASKS && now - firstAsk > COVER_STALL_MS) shrink();
     const r = el.getBoundingClientRect();
-    const cover = { x: r.left, y: r.top, width: r.width, height: inPageHeight };
+    const cover = { x: r.left, y: r.top, width: r.width };
     const key = JSON.stringify(cover);
     if (key === sent && now - sentAt < COVER_RESEND_MS) return;
     sent = key;
     sentAt = now;
-    if (!unanswered) unanswered = now;
+    if (!asks++) firstAsk = now;
     iframe.contentWindow?.postMessage({ source: 'onlyread-page', cover, seq }, origin);
   };
   const track = () => {
@@ -97,32 +99,35 @@ async function frame(el: HTMLElement): Promise<void> {
     wanted = true;
     seq++;
     sent = '';
-    unanswered = 0;
+    asks = 0;
     track();
   };
-  // The frame is ready for this dialog (it knows the spot and its in-page size): it grows to the window.
+  // The frame is ready for this dialog (it knows the spot): it grows to the window.
   const ready = (n: number) => {
     if (!wanted || n !== seq) return;
-    unanswered = 0;
+    asks = 0;
     if (covered) return;
     covered = { minHeight: el.style.minHeight };
     el.style.minHeight = `${iframe.getBoundingClientRect().height}px`;
     for (const [k, v] of COVER) iframe.style.setProperty(k, v);
   };
+  // Back in its spot at its own height.
+  const shrink = () => {
+    if (!covered) return;
+    for (const [k] of COVER) iframe.style.removeProperty(k);
+    iframe.style.height = `${inPageHeight}px`;
+    el.style.minHeight = covered.minHeight;
+    covered = undefined;
+  };
   const uncover = () => {
     if (!wanted) return;
     wanted = false;
     cancelAnimationFrame(tracking);
-    if (covered) {
-      for (const [k] of COVER) iframe.style.removeProperty(k);
-      iframe.style.height = `${inPageHeight}px`;
-      el.style.minHeight = covered.minHeight;
-      covered = undefined;
-    }
+    shrink();
     iframe.contentWindow?.postMessage({ source: 'onlyread-page', cover: null }, origin);
   };
-  // A frame loaded afresh has no dialog open.
-  iframe.addEventListener('load', uncover);
+  // A frame loaded afresh has no dialog open, and numbers its dialogs from the start again.
+  iframe.addEventListener('load', () => { uncover(); seq = 0; });
   addEventListener('message', (e: MessageEvent) => {
     if (e.source !== iframe.contentWindow || e.origin !== origin) return;
     const d = e.data as { source?: unknown; height?: unknown; dialog?: unknown; ready?: unknown } | null;
@@ -164,9 +169,10 @@ const COVER: ReadonlyArray<readonly [string, string]> = [
   ['position', 'fixed'], ['inset', '0'], ['height', '100%'], ['z-index', '2147483647'], ['border-radius', '0'],
 ];
 
-/** While a dialog is open: how often the frame is asked again where its spot is, unchanged or not, and how long an ask
- *  may go unanswered before the frame is taken for gone and the cover let go. */
+/** While a dialog is open: how often the frame is told again where its spot is, unchanged or not, and how many asks
+ *  over how long may go unanswered before the frame is taken for stuck and shrunk back to its spot. */
 const COVER_RESEND_MS = 1000;
+const COVER_STALL_ASKS = 3;
 const COVER_STALL_MS = 3000;
 
 /** How many times a dropped frame is put back. */

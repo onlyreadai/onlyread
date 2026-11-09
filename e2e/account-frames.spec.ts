@@ -97,12 +97,7 @@ test('a dialog closed and opened again at once covers the window as the first di
   const f = await openFramed(h, framesPage('test.user@example.com'), { width: 1200, height: 800 });
   await f.show();
   await f.covering();
-  await f.frame.evaluate(() => {
-    const d = document.getElementById('report-dialog') as HTMLDialogElement;
-    d.close();
-    setTimeout(() => d.showModal(), 0);
-  });
-  await f.page.waitForTimeout(300);
+  await f.show(true); // never seen clipped while the frame shrinks back and grows again
   await f.covering();
   await f.close();
   await f.back();

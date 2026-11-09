@@ -27,16 +27,35 @@ export async function openFramed(h: Harness, url: string, size?: { width: number
   await expect(inner.locator('#activity')).toBeVisible({ timeout: 10_000 });
   const iframe = page.locator('#activity iframe');
   const spot = page.locator('#activity');
-  await expect.poll(async () => iframe.evaluate((f) => (f as HTMLIFrameElement).style.height)).not.toBe('240px');
   const frame = (await (await iframe.elementHandle())!.contentFrame())!; // Activity's, not Security's
+  // The frame sized to its content, as it told the page.
+  await expect.poll(async () => (await iframe.evaluate((f) => (f as HTMLIFrameElement).style.height)) ===
+    `${await frame.evaluate(() => Math.ceil(document.querySelector('.page')!.getBoundingClientRect().height))}px`).toBe(true);
   // The frame at the screen's scaling, as the page around it.
-  expect(await frame.evaluate(() => devicePixelRatio)).toBe(await page.evaluate(() => devicePixelRatio));
+  expect(await frame.evaluate(() => devicePixelRatio)).toBeCloseTo(await page.evaluate(() => devicePixelRatio), 5);
   // The section's entrance animation over: no finite animation left running in the frame.
   await expect.poll(() => frame.evaluate(() => document.getAnimations().filter((a) => a.playState === 'running' && a.effect?.getComputedTiming().endTime !== Infinity).length)).toBe(0);
   const before = { frame: await iframe.boundingBox(), spot: (await spot.boundingBox())!, height: await iframe.evaluate((f) => (f as HTMLIFrameElement).style.height) };
   const section = (await inner.locator('#activity').boundingBox())!;
   const dialog = inner.locator('#report-dialog');
-  const show = () => frame.evaluate(() => (document.getElementById('report-dialog') as HTMLDialogElement).showModal());
+  /** Opens the dialog (`again`: closes it first, and opens it again a task later) and watches every frame for the next
+   *  second: the dialog must never be seen (opacity above 0) while the frame is not the window's size, or it shows
+   *  clipped to the section's small frame. */
+  const show = async (again = false) => {
+    const { w, hgt } = await page.evaluate(() => ({ w: document.documentElement.clientWidth, hgt: document.documentElement.clientHeight }));
+    const seen = await frame.evaluate(({ again }) => new Promise<{ w: number; h: number }[]>((resolve) => {
+      const d = document.getElementById('report-dialog') as HTMLDialogElement;
+      const samples: { w: number; h: number }[] = [];
+      const t0 = performance.now();
+      const sample = () => {
+        if (d.open && Number(getComputedStyle(d).opacity) > 0) samples.push({ w: visualViewport!.width, h: visualViewport!.height });
+        if (performance.now() - t0 < 1000) requestAnimationFrame(sample); else resolve(samples);
+      };
+      if (again) { d.close(); setTimeout(() => { d.showModal(); sample(); }, 0); } else { d.showModal(); sample(); }
+    }), { again });
+    expect(seen.length).toBeGreaterThan(0);
+    for (const s of seen) expect(Math.abs(s.w - w) <= 2 && Math.abs(s.h - hgt) <= 2, `dialog seen in a ${s.w}×${s.h} frame`).toBe(true);
+  };
   const close = () => frame.evaluate(() => (document.getElementById('report-dialog') as HTMLDialogElement).close());
   /** Covering: the frame is the window, the section drawn at its spot (fixed in the frame, not at the frame's corner),
    *  the dialog shown, in the window's middle. */
