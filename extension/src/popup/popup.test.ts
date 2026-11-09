@@ -135,6 +135,20 @@ describe('a site OnlyRead knows', () => {
     expect(subs()).toEqual(['Off']);
   });
 
+  // Guard every site guards a site as if it were switched on: the switch shows it on and fixed. An allowed host
+  // (no byGuardAll) is off.
+  it('a row guard every site guards shows on and fixed, and says why; an allowed one shows off', async () => {
+    answers.sites = [view({ enabled: false, local: false, account: false, byGuardAll: true })];
+    await refreshed();
+    expect(subs()).toEqual(['On', 'On because every site is guarded']);
+    const input = row().querySelector<HTMLInputElement>('input[type="checkbox"]')!;
+    expect([input.checked, input.disabled]).toEqual([true, true]);
+    answers.sites = [view({ enabled: false, local: false, account: false })];
+    await refreshed();
+    expect(subs()).toEqual(['Off']);
+    expect(row().querySelector<HTMLInputElement>('input[type="checkbox"]')!.checked).toBe(false);
+  });
+
   // Pro mode (a Pro judge, signed in, the account's lists in force): the switch changes the account's lists.
   it('in Pro mode a site on the account switches here, with a spinner while its change is on its way and no words', async () => {
     answers.status = status({ managed: { version: 3, at: 1 } });

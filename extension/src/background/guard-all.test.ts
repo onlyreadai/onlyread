@@ -4,7 +4,7 @@ import { guardsHost } from './decision';
 import { defaultPolicy, normalizePolicy } from './policy';
 import { weakeningChanges } from './protection';
 import { buildRules, guardedDomains } from './rules';
-import { excludeHost } from './sites';
+import { excludeHost, guardedSiteName, listSites, profiledSites } from './sites';
 
 const eff = (over: Partial<Policy['effective']> = {}) => ({ targetDomains: [], guardAll: false, excludeDomains: [], exemptDomains: [], ...over });
 const policy = (over: Partial<Policy> = {}) => normalizePolicy({ ...defaultPolicy(), sites: {}, customSites: [], ...over, cloud: { serviceUrl: 'https://pro.example', timeoutMs: 8000 } });
@@ -28,6 +28,47 @@ describe('the effective policy', () => {
     expect(p.effective).toMatchObject({ guardAll: true, excludeDomains: ['news.example.com', 'localhost'], exemptDomains: ['pro.example'] });
     expect(policy({ guardAll: false, excludeSites: ['news.example.com'] }).effective).toMatchObject({ guardAll: false, excludeDomains: [] });
     expect(excludeHost('co')).toBeUndefined();
+  });
+
+  it("applies every site's whole profile on its hosts while everything is guarded, switched on or not", () => {
+    const linkedin = (p: Policy) => p.effective.siteRules.find((r) => r.domains.includes('linkedin.com'));
+    const all = policy({ guardAll: true });
+    expect(linkedin(all)?.readTrackingShapes).toContain('li:msg:w[read]');
+    expect(all.effective.blockedShapes).toContain('li:msg:w');
+    expect(all.effective.socketGuards).toContainEqual({ codec: 'whatsapp', domains: ['web.whatsapp.com'] });
+    expect(all.effective.profileDomains).toEqual(expect.arrayContaining(['linkedin.com', 'mail.google.com', 'web.whatsapp.com']));
+    expect(all.effective.targetDomains).toEqual([]); // the list itself stays as set
+    const built = buildRules(all);
+    const rule = [...built.reasons].find(([, why]) => why === 'blocked-get-path:action=RESPOND')!;
+    expect(built.rules.find((r) => r.id === rule[0])!.condition.requestDomains).toContain('mail.google.com');
+    // An allowed host stays unguarded, profile or not.
+    const allowed = policy({ guardAll: true, excludeSites: ['linkedin.com'] }).effective;
+    expect(allowed.profileDomains).not.toContain('linkedin.com');
+    expect(allowed.siteRules.some((r) => r.domains.includes('linkedin.com'))).toBe(false);
+    // Without guard every site only the switched-on sites' profiles apply.
+    expect(linkedin(policy({ guardAll: false }))).toBeUndefined();
+    expect(linkedin(policy({ guardAll: false, sites: { linkedin: { enabled: true } } }))?.readTrackingShapes).toContain('li:msg:w[read]');
+  });
+
+  it('profiles every site under guard every site (labels, the notice name), the allowed ones but', () => {
+    const ids = (p: Policy) => profiledSites(p).map((s) => s.id);
+    expect(ids(policy({ guardAll: true }))).toEqual(expect.arrayContaining(['linkedin', 'gmail', 'whatsapp']));
+    expect(ids(policy({ guardAll: true, excludeSites: ['linkedin.com'] }))).not.toContain('linkedin');
+    expect(ids(policy({ guardAll: false, sites: { linkedin: { enabled: true } } }))).toEqual(['linkedin']);
+    expect(guardedSiteName(policy({ guardAll: true }), 'www.linkedin.com')).toBe('LinkedIn');
+    expect(guardedSiteName(policy({ guardAll: false }), 'www.linkedin.com')).toBeUndefined();
+  });
+
+  it('lists a site guard every site guards as guarded by it, and an allowed one or a switched-on one not', () => {
+    const li = (p: Policy) => listSites(p).find((s) => s.id === 'linkedin')!;
+    expect(li(policy({ guardAll: true }))).toMatchObject({ enabled: false, byGuardAll: true });
+    expect(li(policy({ guardAll: true, excludeSites: ['linkedin.com'] })).byGuardAll).toBeUndefined();
+    expect(li(policy({ guardAll: true, sites: { linkedin: { enabled: true } } })).byGuardAll).toBeUndefined();
+    expect(li(policy({ guardAll: false })).byGuardAll).toBeUndefined();
+    // An allowed part of the site: off there, on elsewhere on the site.
+    const part = policy({ guardAll: true, excludeSites: ['news.linkedin.com'] });
+    expect(listSites(part, 'news.linkedin.com').find((s) => s.id === 'linkedin')!.byGuardAll).toBeUndefined();
+    expect(listSites(part, 'www.linkedin.com').find((s) => s.id === 'linkedin')!.byGuardAll).toBe(true);
   });
 });
 
@@ -120,8 +161,10 @@ describe('an allowed child under a listed site', () => {
     expect(guardedDomains(p)).toEqual({ excludedRequestDomains: ['free.test', 'pro.example'] });
     const b = buildRules(p);
     for (const [id, why] of b.reasons) {
+      // The socket rule also leaves out Linear, whose profile allows sockets and applies, on or off, under guard every site.
+      const out = why === 'websocket' ? ['free.test', 'pro.example', 'linear.app'] : ['free.test', 'pro.example'];
       if (why === 'post-navigation' || why === 'websocket' || why === 'mutating-method') {
-        expect(b.rules.find((r) => r.id === id)!.condition.excludedRequestDomains, why).toEqual(['free.test', 'pro.example']);
+        expect(b.rules.find((r) => r.id === id)!.condition.excludedRequestDomains, why).toEqual(out);
       }
     }
   });

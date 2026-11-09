@@ -3,7 +3,7 @@ import { initTheme } from '../shared/theme';
 import { reloadOnDevBuild } from '../shared/dev-reload';
 import { setLockText } from '../shared/lock-text';
 reloadOnDevBuild();
-import { ACCOUNT_ONLY_SWITCH, exclusionLine, popupFooter } from '../shared/status-text';
+import { ACCOUNT_ONLY_SWITCH, GUARD_ALL_SWITCH, exclusionLine, popupFooter } from '../shared/status-text';
 import { $, activeWebTab, faviconImg, iconImg, identify, installIconFallbacks, lockedBy, send, type SiteIdentity } from './ui';
 
 installIconFallbacks();
@@ -109,12 +109,14 @@ function knownSiteRow(site: SiteView, status: Status): HTMLElement {
   row.className = 'site';
   const pro = proMode(status);
   // An agent's browser is managed from the account alone: no switch moves here.
-  const locked = (site.account && !pro) || (site.enabled && status.lock?.agent) || status.lock?.agentBrowser === true;
-  const note = site.account && site.enabled ? accountMark(site, pro) : '';
+  // Guard every site guards the site as if it were switched on: it shows on, and only that setting turns it off.
+  const on = site.enabled || site.byGuardAll === true;
+  const locked = site.byGuardAll === true || (site.account && !pro) || (site.enabled && status.lock?.agent) || status.lock?.agentBrowser === true;
+  const note = site.byGuardAll ? `<span class="sub scope-note">${GUARD_ALL_SWITCH}</span>` : site.account && site.enabled ? accountMark(site, pro) : '';
   row.innerHTML =
     '<div class="logo"></div>' +
     `<div class="meta"><div class="name"><span class="n"></span></div><div class="sub"></div>` +
-    `<div class="actions"><label class="switch"><input type="checkbox" ${site.enabled ? 'checked' : ''} ${locked ? 'disabled' : ''}><span></span></label><span class="sub">${site.enabled ? 'On' : 'Off'}</span>${note}</div></div>`;
+    `<div class="actions"><label class="switch"><input type="checkbox" ${on ? 'checked' : ''} ${locked ? 'disabled' : ''}><span></span></label><span class="sub">${on ? 'On' : 'Off'}</span>${note}</div></div>`;
   row.querySelector('.logo')!.append(iconImg(site));
   (row.querySelector('.n') as HTMLElement).textContent = site.name;
   // The site's own domains, not their subdomains (x.com, not api.x.com and upload.x.com beside it).

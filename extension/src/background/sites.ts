@@ -85,14 +85,33 @@ function enabledSites(p: SiteLists): SiteProfile[] {
   return [...builtins, ...customs];
 }
 
+/** Sites in force that are not switched on (every other built-in site, every custom site switched off), each with
+ *  only its domains that guard every site guards: an allowed or exempt host stays unguarded, profile or not. */
+function otherSites(p: SiteLists, unguarded: string[]): SiteProfile[] {
+  const f = sitesInForce(p);
+  const builtins = BUILTIN_SITES.filter((s) => !f.sites[s.id]?.enabled);
+  const customs = f.customSites.filter((c) => !c.enabled).map(customAsProfile);
+  return [...builtins, ...customs]
+    .map((s) => ({ ...s, domains: s.domains.filter((d) => !isTargetHost(d, unguarded)) }))
+    .filter((s) => s.domains.length > 0);
+}
+
+/** The sites whose profile applies: the switched-on ones, and under guard every site every other one (otherSites).
+ *  Guard every site behaves on a site as switching that site on does. */
+export function profiledSites(p: SiteLists & Partial<Pick<Policy, 'guardAll' | 'excludeSites' | 'cloud'>>): SiteProfile[] {
+  const on = enabledSites(p);
+  const all = guardAllFrom(p);
+  return all.guardAll ? [...on, ...otherSites(p, [...all.excludeDomains, ...all.exemptDomains])] : on;
+}
+
 /** Ids of the sites currently guarded (built-in and custom), from the lists in force. */
 export function guardedSiteIds(p: SiteLists): string[] {
   return enabledSites(p).map((s) => s.id);
 }
 
 /** The name of the guarded site that owns this host (the in-page notice's "OnlyRead kept <name> read-only"). */
-export function guardedSiteName(p: SiteLists, host: string): string | undefined {
-  return enabledSites(p).find((s) => isTargetHost(host, s.domains))?.name;
+export function guardedSiteName(p: SiteLists & Partial<Pick<Policy, 'guardAll' | 'excludeSites' | 'cloud'>>, host: string): string | undefined {
+  return profiledSites(p).find((s) => isTargetHost(host, s.domains))?.name;
 }
 
 /** Whether the Pro account's list guards this site (built-in or custom): then this browser cannot switch it off, only
@@ -108,7 +127,7 @@ function localGuards(p: SiteLists, id: string): boolean {
 
 const uniq = (xs: (string[] | undefined)[]): string[] => [...new Set(xs.flatMap((x) => x ?? []))];
 
-/** An enabled site's own allow-lists with its domains, for decision.ts to match on its hosts alone; undefined for a site
+/** A site's own allow-lists with its domains, for decision.ts to match on its hosts alone; undefined for a site
  *  with none (a custom site, Reddit, X). Not pooled into global lists: pooled,
  *  Linear's `sentry`, `datadog` and `segment`, LinkedIn's `/rum` and Facebook's `/ajax/presence/` would allow a POST on
  *  any other guarded host, and under guard-all on any host, without a judge; each pattern is backed by labels of its own
@@ -138,7 +157,7 @@ export function guardAllInForce(p: Pick<Policy, 'guardAll' | 'excludeSites' | 'm
   return { on: true, exclude: candidates.filter((h) => levels.every((l) => isTargetHost(h, l))) };
 }
 
-function guardAllFrom(p: Pick<Policy, 'guardAll' | 'excludeSites' | 'managed' | 'cloud'>): Pick<EffectivePolicy, 'guardAll' | 'excludeDomains' | 'exemptDomains'> {
+function guardAllFrom(p: Pick<Policy, 'managed'> & Partial<Pick<Policy, 'guardAll' | 'excludeSites' | 'cloud'>>): Pick<EffectivePolicy, 'guardAll' | 'excludeDomains' | 'exemptDomains'> {
   let service: string[] = [];
   try { service = p.cloud?.serviceUrl ? [new URL(p.cloud.serviceUrl).hostname] : []; } catch { /* no service */ }
   const g = guardAllInForce(p);
@@ -149,35 +168,47 @@ export function resolveEffective(p: Pick<Policy, 'sites' | 'customSites' | 'mana
   const on = enabledSites(p);
   const wsDefault = p.websockets ?? 'block';
   const brDefault = p.blockResponse ?? 'fail';
+  const all = guardAllFrom(p);
+  // Under guard every site a site that is not switched on is guarded all the same, so its whole profile applies on its
+  // hosts as if it were on: its allow-lists (read tracking among them), block-lists, sockets, editors and block delivery.
+  // Only the list stays apart (targetDomains): switching a site on still guards it with guard every site off.
+  const prof = profiledSites(p);
   return {
     targetDomains: uniq(on.map((s) => s.domains)),
-    ...guardAllFrom(p),
+    profileDomains: uniq(prof.map((s) => s.domains)),
+    ...all,
     // The global allow-lists stay global; each site's own go with its domains (siteRules). The block-lists pool: a
     // blocked path or a codec's write prefix only blocks more wherever it is seen.
     telemetryAllow: uniq([p.telemetryAllow]),
-    blockedGetPaths: uniq([p.blockedGetPaths, ...on.map((s) => s.blockedGetPaths)]),
-    blockedShapes: uniq([p.blockedShapes, ...on.map((s) => s.blockedShapes)]),
+    blockedGetPaths: uniq([p.blockedGetPaths, ...prof.map((s) => s.blockedGetPaths)]),
+    blockedShapes: uniq([p.blockedShapes, ...prof.map((s) => s.blockedShapes)]),
     allowedShapes: uniq([p.allowedShapes]),
     readTrackingShapes: uniq([p.readTrackingShapes]),
-    siteRules: on.map(siteRulesOf).filter((r): r is SiteRules => r !== undefined),
+    siteRules: prof.map(siteRulesOf).filter((r): r is SiteRules => r !== undefined),
     // A site blocks WS by its own setting, or the global default when it has none. Only blocking sites' domains go in.
-    websocketBlockDomains: uniq(on.filter((s) => (s.websockets ?? wsDefault) === 'block').map((s) => s.domains)),
-    websocketAllowDomains: uniq(on.filter((s) => (s.websockets ?? wsDefault) === 'allow').map((s) => s.domains)),
+    websocketBlockDomains: uniq(prof.filter((s) => (s.websockets ?? wsDefault) === 'block').map((s) => s.domains)),
+    websocketAllowDomains: uniq(prof.filter((s) => (s.websockets ?? wsDefault) === 'allow').map((s) => s.domains)),
     // Domains that deliver a block as a rollback-triggering rejection (site setting, else global default).
-    rejectDomains: uniq(on.filter((s) => (s.blockResponse ?? brDefault) === 'reject').map((s) => s.domains)),
+    rejectDomains: uniq(prof.filter((s) => (s.blockResponse ?? brDefault) === 'reject').map((s) => s.domains)),
     // Domains whose editors the content script locks (opt-in per site).
-    editorGuardDomains: uniq(on.filter((s) => s.editorGuard === true).map((s) => s.domains)),
+    editorGuardDomains: uniq(prof.filter((s) => s.editorGuard === true).map((s) => s.domains)),
     // Domains whose socket carries reads and writes alike, guarded stanza by stanza (socket-guard.ts).
-    socketGuardDomains: uniq(on.filter((s) => s.socketGuard !== undefined).map((s) => s.domains)),
-    socketGuards: on.flatMap((s) => (s.socketGuard ? [{ codec: s.socketGuard, domains: uniq([s.domains]) }] : [])),
+    socketGuardDomains: uniq(prof.filter((s) => s.socketGuard !== undefined).map((s) => s.domains)),
+    socketGuards: prof.flatMap((s) => (s.socketGuard ? [{ codec: s.socketGuard, domains: uniq([s.domains]) }] : [])),
   };
 }
 
 /** Every known site (enabled or not) as the popup shows it, flagging the one that owns `host`, and saying which list
  *  guards each: `local` (this browser's own settings), `account` (the Pro account's list), both or neither. */
-export function listSites(p: SiteLists, host?: string): SiteView[] {
+export function listSites(p: SiteLists & Partial<Pick<Policy, 'guardAll' | 'excludeSites' | 'cloud'>>, host?: string): SiteView[] {
   const h = (host ?? '').toLowerCase();
   const f = sitesInForce(p);
+  const profiled = new Set(profiledSites(p).map((s) => s.id));
+  // Guard every site guards a site that is not switched on as if it were, unless its host is allowed: the whole site, or
+  // the very host the popup was opened on (an allowed part of a site the rest of which stays guarded).
+  const g = guardAllFrom(p);
+  const hostAllowed = h !== '' && isTargetHost(h, [...g.excludeDomains, ...g.exemptDomains]);
+  const byAll = (id: string, enabled: boolean, current: boolean) => (!enabled && profiled.has(id) && !(current && hostAllowed) ? { byGuardAll: true } : {});
   const scope = (id: string) => {
     const scopes = accountScopesOf(p, id);
     const waiting = (p.accountEdits ?? []).some((e) => e.id === id);
@@ -186,10 +217,11 @@ export function listSites(p: SiteLists, host?: string): SiteView[] {
   const views: SiteView[] = BUILTIN_SITES.map((s) => ({
     id: s.id, name: s.name, domains: s.domains, enabled: Boolean(f.sites[s.id]?.enabled), builtin: true, verified: Boolean(s.verified), iconUrl: s.iconUrl, description: s.description, outOfScope: s.outOfScope,
     current: h !== '' && isTargetHost(h, s.domains), cacheSize: Object.keys(s.cache ?? {}).length, ...scope(s.id),
+    ...byAll(s.id, Boolean(f.sites[s.id]?.enabled), h !== '' && isTargetHost(h, s.domains)),
   }));
   // A custom site the account lists switched off, and this browser does not list, guards nothing anywhere: the account
   // page shows it; here it would only be a row with nothing to do.
-  for (const c of f.customSites.filter((x) => x.enabled || p.customSites?.some((l) => l.id === x.id))) views.push({ id: c.id, name: c.name, domains: c.domains, enabled: c.enabled, builtin: false, verified: false, iconUrl: c.iconUrl, current: h !== '' && isTargetHost(h, c.domains), cacheSize: 0, ...scope(c.id) });
+  for (const c of f.customSites.filter((x) => x.enabled || p.customSites?.some((l) => l.id === x.id))) views.push({ id: c.id, name: c.name, domains: c.domains, enabled: c.enabled, builtin: false, verified: false, iconUrl: c.iconUrl, current: h !== '' && isTargetHost(h, c.domains), cacheSize: 0, ...scope(c.id), ...byAll(c.id, c.enabled, h !== '' && isTargetHost(h, c.domains)) });
   return views;
 }
 

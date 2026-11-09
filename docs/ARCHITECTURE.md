@@ -498,8 +498,11 @@ From the harness: `ctl.py sites`, `ctl.py site gmail on|off`, `ctl.py site-add <
 
 The opposite of a site list: every host is guarded except the allowed ones. Hosts OnlyRead has no profile for are
 judged like a custom site (reads pass, clear writes are refused, the rest goes to the AI judge), so their sign-ins and
-searches keep working. The blocked GET paths stay with the listed sites, while a POST page load is refused on every
-guarded host and the global socket default covers every guarded host but the sites that allow sockets and the allowed
+searches keep working. A site OnlyRead does have a profile for gets its whole profile on its hosts, switched on or
+not, as if it were on: its shipped labels, allow-lists (read tracking among them), block-lists, socket setting and
+stanza guard, editor lock and block delivery (`sites.ts profiledSites`, `profileDomains`). Only the list itself stays as set, and an
+allowed host stays unguarded, profile or not. The blocked GET paths stay with the profiled sites, while a POST page
+load is refused on every guarded host and the global socket default covers every guarded host but the sites that allow sockets and the allowed
 hosts (`rules.ts leftOut`: naming the listed sites only would let an unlisted host's socket and a form posting into
 a new tab through). An allowed host at or under a listed site is no exception for any rule, as `guardsHost` guards
 it. The browser's own settings set it, and so can a Pro account, each with its own allowed hosts. A higher level is

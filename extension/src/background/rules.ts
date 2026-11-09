@@ -354,9 +354,10 @@ export function buildRules(policy: Policy, opts: { failClosed?: boolean } = {}):
   const reasons = new Map<number, string>();
   const guarded = guardedDomains(policy);
   if (!guarded) return { rules, reasons };
-  // The guarded sites' own domains: the rules that know a site (a POST page load, its GET paths) apply to them only.
-  // Every other host that guarding everything takes in is judged by the debugger, sign-ins and searches included.
-  const domains = normalizeDomains(policy.effective.targetDomains);
+  // The profiled sites' own domains (the listed ones, and under guard every site every other site's): the rules that
+  // know a site (its GET paths) apply to them only. Every other host guarding everything takes in is judged by the
+  // debugger, sign-ins and searches included.
+  const domains = normalizeDomains(policy.effective.profileDomains ?? policy.effective.targetDomains);
 
   if (opts.failClosed) {
     // Two halves: the POSTs, leaving out the background's own (its judge must answer while the tabs are attached), and

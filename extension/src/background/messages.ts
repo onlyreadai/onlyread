@@ -5,7 +5,7 @@ import { afterDemoPolicy, beginDemo, demoExpired, demoPolicy, demoState, endDemo
 import { DEMO_SITES, demoSite } from '../shared/demo-sites';
 import { RELEASE_SERVICE_URL, carryManaged, devBuild, devMockServiceUrl, lastWrittenPolicy, normalizePolicy, setPolicy } from './policy';
 import { guardsHost, isTargetHost } from './decision';
-import { accountGuards, accountScopesOf, excludeHost, builtinForHost, builtinSite, hostToSiteId, isPublicSuffix, listSites, sitesInForce, validHost } from './sites';
+import { accountGuards, accountScopesOf, excludeHost, builtinForHost, builtinSite, hostToSiteId, isPublicSuffix, listSites, profiledSites, sitesInForce, validHost } from './sites';
 import { discoverSite } from './site-discover';
 import { nameFromHost } from '../shared/names';
 import { PROVIDERS, isKeyId, isProviderId, keyFor, type ByokChoice } from '../shared/providers';
@@ -264,11 +264,11 @@ export async function importSiteVerdicts(id: string, missingOnly = false): Promi
   return puts.length;
 }
 
-/** Every switched-on site's shipped labels, back in the cache: they are the product's own data, so neither a
- *  cleared cache nor an older install may leave a verified site to the judge alone. */
+/** Every profiled site's shipped labels (switched on, or any under guard every site), back in the cache: they are the
+ *  product's own data, so neither a cleared cache nor an older install may leave a verified site to the judge alone. */
 export async function restoreSiteVerdicts(missingOnly: boolean): Promise<number> {
   let n = 0;
-  for (const [id, s] of Object.entries(sitesInForce(S.policy).sites)) if (s.enabled) n += await importSiteVerdicts(id, missingOnly);
+  for (const s of profiledSites(S.policy)) n += await importSiteVerdicts(s.id, missingOnly);
   return n;
 }
 

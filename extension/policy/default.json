@@ -48,6 +48,7 @@
   "devSink": "http://localhost:4173/__audit",
   "effective": {
     "targetDomains": [],
+    "profileDomains": [],
     "guardAll": false,
     "excludeDomains": [],
     "exemptDomains": [],
