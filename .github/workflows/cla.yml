@@ -21,7 +21,9 @@ jobs:
     if: github.repository == 'onlyreadai/onlyread'
     runs-on: ubuntu-latest
     steps:
-      - if: (github.event.comment.body == 'recheck' || github.event.comment.body == 'I have read the CLA Document and I hereby sign the CLA') || github.event_name == 'pull_request_target'
+      # The action trims and lowercases a comment before matching it, so this gate does too: a sentence sent with a
+      # trailing newline (as some browsers and editors add) still signs. contains() ignores case.
+      - if: github.event_name == 'pull_request_target' || startsWith(github.event.comment.body, 'recheck') || contains(github.event.comment.body, 'I have read the CLA Document and I hereby sign the CLA')
         uses: contributor-assistant/github-action@ca4a40a7d1004f18d9960b404b97e5f30a505a08 # v2.6.1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
