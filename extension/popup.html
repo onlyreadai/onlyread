@@ -62,6 +62,11 @@
   /* A change on its way to the Pro account: a small spinner in place of words. */
   .saving { display: inline-block; width: 12px; height: 12px; margin-left: 8px; border: 2px solid color-mix(in srgb, var(--accent) 25%, transparent); border-top-color: var(--accent); border-radius: 50%; vertical-align: -1px; animation: saving-spin .8s linear infinite; }
   @keyframes saving-spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) {
+    .saving {
+      animation-duration: 2.4s;
+    }
+  }
 </style>
 </head>
 <body>
