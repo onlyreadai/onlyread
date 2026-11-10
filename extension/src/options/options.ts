@@ -313,6 +313,13 @@ let activityLimit = (() => { try { const n = Number(localStorage.getItem(SIZE_KE
 let activityOffset = 0;
 /** Each site's icon, from the last Sites list, for activity entries that carry none. */
 let siteIcons = new Map<string, string>();
+/** A refusal's time: relative on screen, the exact date and time on hover. */
+function whenAgo(ts: number, now: number): HTMLElement {
+  const t = textEl('time', 'when-ago', relativeTime(ts, now));
+  t.setAttribute('datetime', new Date(ts).toISOString());
+  t.title = new Date(ts).toLocaleString();
+  return t;
+}
 function activityRow(a: ActivityItem, now: number): HTMLElement {
   const row = textEl('div', a.socket ? 'row socket' : 'row', '');
   row.title = a.code; // the internal codes, for whoever wants them
@@ -324,7 +331,7 @@ function activityRow(a: ActivityItem, now: number): HTMLElement {
   // A site's live connections kept closed: one quiet row, said for what it is, with nothing to report.
   if (a.socket) {
     meta.append(name, textEl('div', 'line', 'Not a write: OnlyRead can’t see inside them, so they stay closed'));
-    row.append(logo, meta, textEl('span', 'when-ago', relativeTime(a.ts, now)));
+    row.append(logo, meta, whenAgo(a.ts, now));
     return row;
   }
   meta.append(name, textEl('div', 'line', `Refused on ${a.siteName}`));
@@ -336,7 +343,7 @@ function activityRow(a: ActivityItem, now: number): HTMLElement {
   report.setAttribute('aria-label', `Report a mistake: ${a.what} on ${a.siteName}`);
   report.innerHTML = MEGAPHONE;
   report.addEventListener('click', () => void openReport(a.key));
-  row.append(logo, meta, textEl('span', 'when-ago', relativeTime(a.ts, now)), report);
+  row.append(logo, meta, whenAgo(a.ts, now), report);
   return row;
 }
 

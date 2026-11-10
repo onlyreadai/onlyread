@@ -36,3 +36,14 @@ test('Next and Previous hold while slow refreshes overlap them', async () => {
   await expect(range).toContainText(/^1–10 of/);
   await o.close();
 });
+
+test('each row shows its exact date and time on hover', async () => {
+  const o = await h.ctx.newPage();
+  await o.goto(`chrome-extension://${new URL(h.sw.url()).host}/options.html#activity`);
+  const when = o.locator('time.when-ago').first();
+  await expect(when).toBeVisible({ timeout: 15_000 });
+  const iso = await when.getAttribute('datetime');
+  expect(Number.isNaN(Date.parse(iso ?? ''))).toBe(false);
+  expect(await when.getAttribute('title')).toBe(await o.evaluate((iso) => new Date(iso).toLocaleString(), iso as string));
+  await o.close();
+});
