@@ -36,6 +36,32 @@ const entry = (i: number, over: Partial<AuditEntry> = {}): AuditEntry => ({ kind
 const stored = (): AuditEntry[] => ((store.auditIndex ?? []) as number[]).flatMap((id) => (store[`audit.${id}`] ?? []) as AuditEntry[]);
 const chunkKeys = () => Object.keys(store).filter((k) => k.startsWith('audit.')).sort();
 
+describe('toolbar badge', () => {
+  const g = globalThis as { __ONLYREAD_DIST__?: boolean; __ONLYREAD_SERVICE_URL__?: string };
+  const host = () => chrome as unknown as { action: unknown };
+  let action: unknown;
+  beforeEach(() => { action = host().action; });
+  afterEach(() => { delete g.__ONLYREAD_DIST__; delete g.__ONLYREAD_SERVICE_URL__; host().action = action; });
+  const badge = () => {
+    const text = vi.fn(async () => {});
+    const background = vi.fn(async () => {});
+    host().action = { setBadgeText: text, setBadgeBackgroundColor: background, setBadgeTextColor: vi.fn(async () => {}) };
+    audit.clearBadge();
+    return { text: text.mock.calls.map((c) => (c as unknown[])[0]), background: background.mock.calls.length };
+  };
+  it('is cleared in a development build and in a store release', () => {
+    expect(badge()).toEqual({ text: [{ text: '' }], background: 0 });
+    g.__ONLYREAD_DIST__ = true;
+    g.__ONLYREAD_SERVICE_URL__ = '';
+    expect(badge()).toEqual({ text: [{ text: '' }], background: 0 });
+  });
+  it('says DEV in a test release', () => {
+    g.__ONLYREAD_DIST__ = true;
+    g.__ONLYREAD_SERVICE_URL__ = 'https://foo.example';
+    expect(badge()).toEqual({ text: [{ text: 'DEV' }], background: 1 });
+  });
+});
+
 describe('audit log persistence', () => {
   it('keeps writing after a failed write, and says so until a write succeeds', async () => {
     await audit.record(entry(1, { enforced: true }));

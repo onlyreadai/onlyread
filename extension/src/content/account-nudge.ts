@@ -1,4 +1,4 @@
-// The OnlyRead Pro account page's word that the account changed (the cloud repo's app/account/nudge.ts): passed to the
+// The OnlyRead Pro account page's word that the account changed (sent by the Pro account page): passed to the
 // background, which asks for the account's lists at once when it comes from the configured service's pages
 // (messages.ts accountChanged). Only a message the page posted to itself, of exactly this shape, top frame only; it
 // carries nothing but that something changed.

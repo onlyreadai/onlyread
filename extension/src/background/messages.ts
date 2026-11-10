@@ -3,7 +3,7 @@ import type { AccountEdit, Message, Policy, SiteView, Status, SupportList } from
 import { writeConsent } from './consent';
 import { afterDemoPolicy, beginDemo, demoExpired, demoPolicy, demoState, endDemo, onDemoSite, setDemoTab, whenDemoStops } from './demo';
 import { DEMO_SITES, demoSite } from '../shared/demo-sites';
-import { RELEASE_SERVICE_URL, carryManaged, devBuild, devMockServiceUrl, lastWrittenPolicy, normalizePolicy, setPolicy } from './policy';
+import { carryManaged, devBuild, devServiceSwitch, lastWrittenPolicy, normalizePolicy, setPolicy } from './policy';
 import { guardsHost, isTargetHost } from './decision';
 import { accountGuards, accountScopesOf, excludeHost, builtinForHost, builtinSite, hostToSiteId, isPublicSuffix, listSites, profiledSites, sitesInForce, validHost, allowedOff, siteAllowHosts, withAccountRemove } from './sites';
 import { discoverSite } from './site-discover';
@@ -1080,7 +1080,13 @@ export async function offWithoutJudge(): Promise<void> {
   // and meanwhile the switch stays shown so the person can turn it off with the PIN.
   await save({ ...latest(), enabled: false }).catch((err: unknown) => system(`judge-missing:protection-left-on ${err instanceof Error ? err.message : String(err)}`));
 }
-whenSignedOut(() => { void settleMode('signed-out').then(offWithoutJudge); void notifyAccountPages('this-browser-changed'); });
+/** What the last sign-out set off (the judge settled, protection off with no judge), for a write that must land after it
+ *  (applyBuildService). */
+let signedOutSettled: Promise<unknown> = Promise.resolve();
+whenSignedOut(() => {
+  signedOutSettled = settleMode('signed-out').then(offWithoutJudge);
+  void notifyAccountPages('this-browser-changed');
+});
 whenLockOpens(() => { void settleMode('lock-opened').then(offWithoutJudge); });
 
 // ---- The first-run demo (demo.ts): started from the setup window, guided by the coach card on the site, ended by the
@@ -1322,20 +1328,31 @@ export async function expireDemo(now = Date.now()): Promise<void> {
   else if (demoExpired(now)) await finishDemo(true);
 }
 
-/** Development builds: the Pro service this browser uses, the local mock or production. A sign-in belongs to the service
- *  it was made on, so the browser signs out of the one it leaves; an agent's browser keeps its sign-in and cannot switch.
- *  Saved like any change of the service (the lock applies, protection.ts). */
-async function setService(msg: Of<'cloud:service-set'>) {
-  if (!devBuild()) throw new Error('choosing the Pro service exists only in development builds');
-  const url = msg.service === 'local' ? devMockServiceUrl(S.policy.devSink) : RELEASE_SERVICE_URL;
-  if (!url) return { ok: false, error: 'This build has no local mock service (no dev sink).' };
-  if (url === S.policy.cloud.serviceUrl.replace(/\/$/, '')) return cloudStatus(false);
-  if (S.agentBrowser) throw new Error(`${LOCKED_PREFIX}agent:This browser belongs to an AI agent, so it stays on the service it is signed in to.`);
+/** A development build made with ONLYREAD_SERVICE_URL, starting (index.ts): the build's service wins over the saved one
+ *  (policy.ts devServiceSwitch). A sign-in belongs to the service it was made on, so the browser signs out of the one it
+ *  leaves. Written around the settings lock, like an address a release ships with: the build chooses it, nothing in the
+ *  browser can, so a settings PIN does not hold it. What an agent holds stays: an agent's browser signed in keeps its
+ *  service (its sign-in is its setup link's), and a person's browser signed in while an agent works waits for the next
+ *  start rather than lose its Pro judge mid-session; both are logged. The sign-out comes first, so the old service's
+ *  tokens never go to the new one; the new address is written once what the sign-out settles (the judge, protection
+ *  with no judge) is written, on top of it, so neither write undoes the other. */
+export async function applyBuildService(): Promise<void> {
+  const to = devServiceSwitch(latest());
+  if (!to) return;
+  const from = latest().cloud.serviceUrl;
   const leaving = cloudClient();
-  await save({ ...latest(), cloud: { ...latest().cloud, serviceUrl: url } });
-  if (await leaving.signedIn()) await leaving.signOut();
-  system(`cloud:service ${url}`);
-  return { ...(await cloudStatus(false)), serviceUrl: url };
+  const signedIn = await leaving.signedIn();
+  if (signedIn && agentAtWork()) {
+    system(`cloud:service-kept ${from} (this build's is ${to}; ${S.agentBrowser ? "an agent's browser stays on its service" : 'an agent is at work'})`);
+    return;
+  }
+  if (signedIn) {
+    await leaving.signOut();
+    await signedOutSettled.catch(() => {}); // its failure is its own to report
+  }
+  const base = latest();
+  await setPolicy(carryManaged({ ...base, cloud: { ...base.cloud, serviceUrl: to } }));
+  system(`cloud:service ${to} (this build's${signedIn ? `; signed out of ${from}` : ''})`);
 }
 
 /** Options page: patch the guard controls together. enabled=false is the Off state. */
@@ -1409,7 +1426,6 @@ async function status(): Promise<Status> {
     agentWhere: await agentWhere(),
     attachmentActive: attachmentOn(),
     devBuild: devBuild(),
-    devServices: devBuild() ? { local: devMockServiceUrl(policy.devSink), production: RELEASE_SERVICE_URL } : undefined,
     cloud: await cloudStatus(false),
     lock: await settingsLock(),
     storageProblem: storageProblem(),
@@ -1496,7 +1512,6 @@ const HANDLERS: Handlers = {
   'judge:byok': chooseByok,
   'cloud:signin': signIn,
   'cloud:signout': signOut,
-  'cloud:service-set': setService,
   // Sync now: the account's site list, fetched and applied (or kept pending) before the status answers.
   'cloud:sync': async (m) => { await syncManagedSites(m.reason === 'settings' ? 'settings-shown' : 'sync-now'); return status(); },
   'cloud:status': (msg) => cloudStatus(Boolean(msg.refresh)),

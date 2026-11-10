@@ -11,11 +11,16 @@ import { relativeTime } from '../shared/refusals';
 import { installSidebar, reducedMotion, scrollToSection, setCount } from './sections';
 import { takeSignInResult } from '../shared/sign-in-result';
 import { MEGAPHONE, mountReport, openReport } from './report';
-import { allowFrame, enterFramed, framedSection, framedTheme } from './framed';
+import { allowFrame, enterFramed, framedSection, framedTheme, strayFrame } from './framed';
 import { mountScene } from '../shared/demo-scene';
 import { reloadOnDevBuild } from '../shared/dev-reload';
 import { markFirstJudge } from '../shared/first-judge';
 import { setLockText } from '../shared/lock-text';
+// In another page's frame without asking for framed mode: blank, and nothing below runs (framed.ts strayFrame).
+if (strayFrame(location.ancestorOrigins ?? [], window.top === window, framedSection() !== undefined)) {
+  document.body.replaceChildren();
+  throw new Error('OnlyRead: the settings page is not shown in another page\'s frame');
+}
 reloadOnDevBuild();
 
 // The view the page opened in last time (renderProManaged): the no-judge view shows at once when it was that, before
@@ -404,7 +409,7 @@ async function refresh(force = false): Promise<void> {
   renderCounts(status, sites, activity);
   if (current) renderActivity(activity);
   // Re-render the rest only when the data changed, so an open menu is not rebuilt underneath the reader.
-  const signature = JSON.stringify([status.judgeMissing, status.enabled, status.mode, status.attachWhen, status.attachmentActive, status.agentSession, status.judge, status.judgeProblem, status.judgeConsent, status.byokLabel, status.cloud, status.lock, status.storageProblem, status.startupProblem, status.verdictsProblem, status.policyProblem, status.managed, status.managedPending, status.accountRefused, status.agentSetup, status.guardAll, status.allowReadTracking, status.devServices, sites.map((s) => [s.id, s.enabled, s.name, s.iconUrl, s.local, s.account, s.scopes, s.waiting])]);
+  const signature = JSON.stringify([status.judgeMissing, status.enabled, status.mode, status.attachWhen, status.attachmentActive, status.agentSession, status.judge, status.judgeProblem, status.judgeConsent, status.byokLabel, status.cloud, status.lock, status.storageProblem, status.startupProblem, status.verdictsProblem, status.policyProblem, status.managed, status.managedPending, status.accountRefused, status.agentSetup, status.guardAll, status.allowReadTracking, sites.map((s) => [s.id, s.enabled, s.name, s.iconUrl, s.local, s.account, s.scopes, s.waiting])]);
   if (!force && signature === lastSignature) return;
   lastSignature = signature;
   pro = proMode(status);
@@ -490,23 +495,7 @@ function renderSecurity(st: Status): void {
   for (const r of document.querySelectorAll<HTMLInputElement>('#when input[name="when"]')) r.checked = r.value === st.attachWhen;
   $('dev').hidden = !st.devBuild;
   $<HTMLInputElement>('monitor').checked = st.mode === 'monitor';
-  renderDevService(st);
 }
-
-/** Development builds: the Pro service in use, the local mock or production (any other address shows as neither). */
-function renderDevService(st: Status): void {
-  const s = st.devServices;
-  $('dev-service').hidden = !s;
-  if (!s) return;
-  const url = (st.cloud?.serviceUrl ?? '').replace(/\/$/, '');
-  const which = url === s.local ? 'local' : url === s.production ? 'production' : '';
-  $<HTMLSelectElement>('pro-service').value = which;
-  $('dev-service-line').textContent = `${url || 'None'}. Switching signs this browser out of Pro.`;
-}
-$('pro-service').addEventListener('change', (ev) => {
-  const service = (ev.target as HTMLSelectElement).value === 'local' ? 'local' : 'production';
-  void change({ type: 'cloud:service-set', service });
-});
 
 // ---- Sites from the Pro account (background/cloud-sync.ts): when its list was applied, what waits. No version on the
 // page: Status.managed.version is for the log and tests.

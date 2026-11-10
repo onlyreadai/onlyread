@@ -721,10 +721,12 @@ judge. With no judge, protection cannot be on, so setting one raises it; while n
 ever has (the first-judge record, which a judge at work writes and the lock keeps from being removed), choosing one (a
 Pro sign-in, a provider, its key) passes an agent at work. A settings PIN still holds it. In the policy,
 `judge.provider: "cloud"` selects Pro (`"byok"` selects the judges below), and
-`cloud.serviceUrl` names the service: official builds point it at OnlyRead Pro, dev builds at a local mock of the
-service served by the fixture. A dev build's settings page (Security, "Pro service") switches between the local mock
-and production. The sign-in belongs to the service it was made on, so switching signs the browser out of the one it
-leaves, and like any change of the service it is refused while an agent works. The service can word the account itself: its
+`cloud.serviceUrl` names the service: official builds point it at OnlyRead Pro, dev builds at the service they were
+built for (`ONLYREAD_SERVICE_URL`, `scripts/build.mjs`): by default a local mock of the service served by the fixture,
+or production. There is no choice in settings. A dev build made with `ONLYREAD_SERVICE_URL` moves the browser to its service when it starts (`messages.ts applyBuildService`); the
+sign-in belongs to the service it was made on, so the browser signs out of the one it leaves. That move goes around the
+settings lock (the build chooses the address, nothing in the browser can), except that a browser signed in while an
+agent works, or an agent's own browser, keeps its service and logs the conflict. The service can word the account itself: its
 account answer may say whether Pro is active and give the status, the usage line, the account button's label and an
 offer to get Pro, and a refusal may carry a sentence saying why. The extension shows them as given and falls back to
 its own wording when one is missing (`shared/cloud-ui.ts`).

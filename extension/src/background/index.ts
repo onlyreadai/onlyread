@@ -2,7 +2,7 @@
 // itself lives in the modules it wires together (state, guard, interception, agent-session, messages, …).
 import type { Message, Policy } from '../shared/types';
 import { shouldPromptForKey } from './setup';
-import { carryManaged, devServiceMove, getPolicy, lastWrittenPolicy, onPolicyChange, policyAccepted, setPolicy } from './policy';
+import { carryManaged, getPolicy, lastWrittenPolicy, onPolicyChange, policyAccepted, setPolicy } from './policy';
 import { tabsToReloadOnModeChange } from './recovery';
 import * as audit from './audit';
 import * as cache from './cache';
@@ -20,7 +20,7 @@ import { markAgentTab, onBannerCancel, readAgentSession, syncAgentWatch, updateA
 import { forgetRecovery, onDecisionError, onDetach, onPaused, onSocketRefusal, onWebRequestError, repeats } from './interception';
 import * as socketGuard from './socket-guard';
 import * as sharedWorkers from './shared-workers';
-import { assumeJudge, demoTabClosed, expireDemo, handle, importSiteVerdicts, judgeMissing, offWithoutJudge, openSetupWindow, putBackOutsideWrite, refusedStorageChange, restoreSiteVerdicts, settleMode } from './messages';
+import { applyBuildService, assumeJudge, demoTabClosed, expireDemo, handle, importSiteVerdicts, judgeMissing, offWithoutJudge, openSetupWindow, putBackOutsideWrite, refusedStorageChange, restoreSiteVerdicts, settleMode } from './messages';
 import { beginOutsideCheck, onOwnedChange } from './owned-storage';
 import { isGuardedKey } from './protection';
 import { MANAGED_POLL_TICK_MS, initManagedSync, managedPollDue, syncManagedSites } from './cloud-sync';
@@ -143,9 +143,6 @@ const startedOnce = new Promise<void>((resolve) => { markStarted = resolve; });
 
 const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
-/** Set once a production development build moved the stored local mock address to the real service (start). */
-const DEV_SERVICE_MOVED = 'devServiceMoved';
-
 function start(): Promise<void> {
   // onInstalled, onStartup and the top-level call can all fire together; run once.
   if (started) return Promise.resolve();
@@ -195,6 +192,7 @@ function start(): Promise<void> {
   return starting;
 }
 
+// No badge, or a test release's DEV.
 audit.clearBadge();
 if (!__ONLYREAD_DIST__) void control.currentInstance().then((id) => sink.setInstance(id));
 
@@ -219,18 +217,9 @@ chrome.runtime.onInstalled.addListener((details) => {
   });
 });
 chrome.runtime.onStartup.addListener(() => void start());
-void start().then(moveDevService);
-
-/** A development build made against production, finding the local mock's address from an earlier build: moved to the
- *  real service once (policy.ts devServiceMove), after startup; a later choice of service stands. */
-async function moveDevService(): Promise<void> {
-  if (__ONLYREAD_DIST__) return;
-  const moved = Boolean((await chrome.storage.local.get(DEV_SERVICE_MOVED).catch(() => ({} as Record<string, unknown>)))[DEV_SERVICE_MOVED]);
-  const to = devServiceMove(S.policy, moved);
-  if (!to) return;
-  await setPolicy({ ...S.policy, cloud: { ...S.policy.cloud, serviceUrl: to } }).catch((err) => console.warn('[onlyread] dev service not moved:', err));
-  await chrome.storage.local.set({ [DEV_SERVICE_MOVED]: true }).catch(() => {});
-}
+// A development build made for a Pro service (ONLYREAD_SERVICE_URL) moves the browser to it, after startup
+// (messages.ts applyBuildService).
+void start().then(() => { if (!__ONLYREAD_DIST__) return applyBuildService().catch((err) => console.warn('[onlyread] build service not applied:', err)); });
 
 /** One policy change at a time, in order, and only after startup: a change written while start() reads the
  *  stored policy must not be overwritten by what it read (a policy landing during getPolicy would otherwise be

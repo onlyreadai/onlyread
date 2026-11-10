@@ -6,7 +6,7 @@
 <title>OnlyRead</title>
 <link rel="stylesheet" href="ui.css" />
 <link rel="stylesheet" href="welcome.css" />
-<!-- The page's layout, shared word for word with the Pro account page (the cloud repo's scripts/extension-sync.mjs). -->
+<!-- The page's layout, shared word for word with the Pro account page (kept in sync by the Pro service). -->
 <link rel="stylesheet" href="layout.css" />
 <style>
   /* The settings page: a sidebar of topics beside one column of sections, the Pro site's pink
@@ -733,10 +733,6 @@
             <div class="row" id="dev" hidden>
               <div class="meta"><div class="name">Monitor mode <span class="devtag">Developer</span></div><div class="line">Log instead of refusing, for recording a new site.</div></div>
               <label class="switch"><input id="monitor" type="checkbox" aria-label="Monitor mode"><span></span></label>
-            </div>
-            <div class="row" id="dev-service" hidden>
-              <div class="meta"><div class="name">Pro service <span class="devtag">Developer</span></div><div class="line" id="dev-service-line"></div></div>
-              <select id="pro-service" aria-label="Pro service"><option value="local">Local mock</option><option value="production">Production</option></select>
             </div>
           </div>
         </section>
