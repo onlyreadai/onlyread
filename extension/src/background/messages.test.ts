@@ -73,6 +73,7 @@ let defaultPolicy: typeof import('./policy').defaultPolicy;
 let normalizePolicy: typeof import('./policy').normalizePolicy;
 let policyAccepted: typeof import('./policy').policyAccepted;
 let guardedSiteIds: typeof import('./sites').guardedSiteIds;
+let listSites: typeof import('./sites').listSites;
 let PIN_ITERATIONS: number;
 let health: typeof import('./storage-health').health;
 let storageFailed: typeof import('./storage-health').storageFailed;
@@ -82,7 +83,7 @@ async function freshModules(): Promise<void> {
   ({ handle, PIN_TRY_LIMIT_MS } = await import('./messages'));
   ({ S } = await import('./state'));
   ({ defaultPolicy, normalizePolicy, policyAccepted } = await import('./policy'));
-  ({ guardedSiteIds } = await import('./sites'));
+  ({ guardedSiteIds, listSites } = await import('./sites'));
   ({ PIN_ITERATIONS } = await import('./protection'));
   ({ health, storageFailed } = await import('./storage-health'));
   // In the extension S.policy only ever takes a policy that was just written (index.ts, as storage reports it), so a
@@ -212,6 +213,43 @@ describe('handle', () => {
     expect(h.saved.at(-1)!.excludeSites).toEqual(['a.example.com', 'b.example.com']);
     await send({ type: 'judge:byok', choice: { id: 'openrouter' } });
     expect(h.saved.at(-1)).toMatchObject({ attachWhen: 'always', sites: { gmail: { enabled: true } }, excludeSites: ['a.example.com', 'b.example.com'] });
+  });
+
+  it('while every site is guarded, a site\'s switch allows it (its own setting off) and guards it again (its own setting back on)', async () => {
+    S.policy = normalizePolicy({ ...S.policy, guardAll: true, excludeSites: ['news.example.org'], sites: { ...S.policy.sites, linkedin: { enabled: true } } });
+    await send({ type: 'site:guard-all', id: 'linkedin', on: false, host: 'www.linkedin.com' });
+    expect(h.saved.at(-1)).toMatchObject({ excludeSites: ['news.example.org', 'linkedin.com'], sites: { linkedin: { enabled: false } }, guardAllOff: ['linkedin'] });
+    // On takes back the hosts at or under the site's domains (and only those), and puts its own setting back on.
+    await send({ type: 'exclude:add', host: 'jobs.linkedin.com' });
+    await send({ type: 'site:guard-all', id: 'linkedin', on: true, host: 'www.linkedin.com' });
+    expect(h.saved.at(-1)).toMatchObject({ excludeSites: ['news.example.org'], sites: { linkedin: { enabled: true } }, guardAllOff: [] });
+    // Its allowed host taken back in settings instead: switched back on there too.
+    await send({ type: 'site:guard-all', id: 'linkedin', on: false, host: 'www.linkedin.com' });
+    expect(h.saved.at(-1)).toMatchObject({ sites: { linkedin: { enabled: false } }, guardAllOff: ['linkedin'] });
+    await send({ type: 'exclude:remove', host: 'linkedin.com' });
+    expect(h.saved.at(-1)).toMatchObject({ excludeSites: ['news.example.org'], sites: { linkedin: { enabled: true } }, guardAllOff: [] });
+    // A site that was not on stays as it was: off then on leaves its own setting off.
+    await send({ type: 'site:guard-all', id: 'x', on: false, host: 'x.com' });
+    expect(h.saved.at(-1)!.guardAllOff).toEqual([]);
+    await send({ type: 'site:guard-all', id: 'x', on: true, host: 'x.com' });
+    expect(h.saved.at(-1)).toMatchObject({ excludeSites: ['news.example.org'], sites: { x: { enabled: false } } });
+    // Gmail, switched on, keeps calendar.google.com guarded: Calendar is not allowed there, and nothing is saved.
+    S.policy = normalizePolicy({ ...S.policy, guardAll: true, excludeSites: [], sites: { ...S.policy.sites, gmail: { enabled: true } } });
+    const before = h.saved.length;
+    expect(await send({ type: 'site:guard-all', id: 'calendar', on: false, host: 'calendar.google.com' })).toMatchObject({ ok: false, error: expect.stringMatching(/^Gmail keeps/) });
+    expect(h.saved).toHaveLength(before);
+  });
+
+  it('while every site is guarded, a custom parent of a built-in site is not allowed, and on keeps the user\'s own allowed hosts', async () => {
+    const google = { id: 'google.com', name: 'Google', domains: ['google.com'], enabled: false };
+    S.policy = normalizePolicy({ ...S.policy, guardAll: true, excludeSites: [], customSites: [...S.policy.customSites, google] });
+    const before = h.saved.length;
+    expect(await send({ type: 'site:guard-all', id: 'google.com', on: false, host: 'www.google.com' })).toMatchObject({ ok: false, error: expect.stringMatching(/^Allowing this site would also allow /) });
+    expect(h.saved).toHaveLength(before);
+    // Calendar on under an allowed google.com: the user's entries stay, and Calendar is switched on (guarded under it).
+    S.policy = normalizePolicy({ ...S.policy, guardAll: true, excludeSites: ['google.com', 'people-pa.clients6.google.com'], customSites: S.policy.customSites.filter((c) => c.id !== 'google.com') });
+    await send({ type: 'site:guard-all', id: 'calendar', on: true, host: 'calendar.google.com' });
+    expect(h.saved.at(-1)).toMatchObject({ excludeSites: ['google.com', 'people-pa.clients6.google.com'], sites: { calendar: { enabled: true } } });
   });
 
   it('a site looked up after it was added keeps the changes made during the lookup', async () => {
@@ -525,6 +563,36 @@ describe('the Pro account\'s site list (cloud-sync.ts)', () => {
     expect(h.saved.at(-1)!.sites.linear?.enabled).toBe(false);
     expect(guardedSiteIds(h.saved.at(-1)!)).not.toContain('linear');
     expect(edits()).toEqual([]); // not on the account: nothing to send
+  });
+
+  it('in Pro mode, while every site is guarded, the switch takes a site off the account and allowed, and back on', async () => {
+    managed();
+    S.policy = normalizePolicy({ ...S.policy, guardAll: true, excludeSites: [] });
+    policyAccepted(S.policy);
+    const gmail = (p: Policy) => listSites(p, 'mail.google.com').find((s) => s.id === 'gmail')!;
+    expect(gmail(S.policy).guardAll).toEqual({ on: true }); // switchable: Pro mode changes the account's list
+    await send({ type: 'site:guard-all', id: 'gmail', on: false, host: 'mail.google.com' });
+    expect(edits()).toEqual([{ op: 'remove', scope: 'account', id: 'gmail', builtin: true, version: 7 }]);
+    expect(h.saved.at(-1)).toMatchObject({ excludeSites: ['mail.google.com'], guardAllOff: ['gmail'] });
+    expect(gmail(h.saved.at(-1)!).guardAll).toEqual({ on: false });
+    // On: the allowed host back, and Gmail back on the account (the removal still waiting is taken back).
+    await send({ type: 'site:guard-all', id: 'gmail', on: true, host: 'mail.google.com' });
+    expect(h.saved.at(-1)).toMatchObject({ excludeSites: [], guardAllOff: [] });
+    expect(gmail(h.saved.at(-1)!)).toMatchObject({ account: true, guardAll: { on: true } });
+  });
+
+  it('in Pro mode, a custom site the switch takes off the account stays here switched off, and goes back on', async () => {
+    const tools = { id: 'tools.example.net', name: 'Tools', domains: ['tools.example.net'], enabled: true };
+    S.policy = normalizePolicy({ ...S.policy, guardAll: true, excludeSites: [], customSites: [], managed: { version: 7, fetchedAt: 1, sites: {}, customSites: [tools] } });
+    policyAccepted(S.policy);
+    const row = (p: Policy) => listSites(p, 'tools.example.net').find((s) => s.id === 'tools.example.net');
+    await send({ type: 'site:guard-all', id: 'tools.example.net', on: false, host: 'tools.example.net' });
+    expect(edits()).toEqual([{ op: 'remove', scope: 'account', id: 'tools.example.net', builtin: false, version: 7 }]);
+    expect(h.saved.at(-1)!.customSites).toEqual([{ ...tools, enabled: false }]);
+    expect(row(h.saved.at(-1)!)).toMatchObject({ guardAll: { on: false } }); // the row stays, off
+    await send({ type: 'site:guard-all', id: 'tools.example.net', on: true, host: 'tools.example.net' });
+    expect(edits().at(-1)).toMatchObject({ op: 'add', id: 'tools.example.net', builtin: false, name: 'Tools' });
+    expect(row(h.saved.at(-1)!)).toMatchObject({ account: true, guardAll: { on: true } });
   });
 
   it('with two or more browsers on the account an addition goes to this browser\'s list, unless one is asked for', async () => {

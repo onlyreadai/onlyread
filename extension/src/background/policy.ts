@@ -106,6 +106,7 @@ const POLICY_CHECKS: PolicyCheck[] = [
   [(p) => p.attachWhen === 'always' || p.attachWhen === 'agent-session', () => 'attachWhen must be always|agent-session'],
   [(p) => p.attachScope === 'all-tabs' || p.attachScope === 'target-tabs', (p) => `attachScope must be all-tabs|target-tabs, got ${String(p.attachScope)}`],
   [(p) => p.guardAll === undefined || typeof p.guardAll === 'boolean', () => 'guardAll must be a boolean'],
+  [(p) => p.guardAllOff === undefined || (Array.isArray(p.guardAllOff) && p.guardAllOff.length <= 500 && p.guardAllOff.every((id) => typeof id === 'string' && id.length <= 255)), () => 'guardAllOff must be at most 500 site ids'],
   [(p) => p.excludeSites === undefined || (Array.isArray(p.excludeSites) && p.excludeSites.length <= 500 && p.excludeSites.every((h) => typeof h === 'string' && h.length <= 255)), () => 'excludeSites must be at most 500 host names'],
   [(p) => p.reviewBand === 'block' || p.reviewBand === 'llm' || p.reviewBand === 'human', (p) => `reviewBand must be block|llm|human, got ${String(p.reviewBand)}`],
   // decision.ts tests `!policy.uploads`: a stored `uploads: "no"` would allow uploads.

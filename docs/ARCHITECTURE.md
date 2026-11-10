@@ -500,8 +500,20 @@ The opposite of a site list: every host is guarded except the allowed ones. Host
 judged like a custom site (reads pass, clear writes are refused, the rest goes to the AI judge), so their sign-ins and
 searches keep working. A site OnlyRead does have a profile for gets its whole profile on its hosts, switched on or
 not, as if it were on: its shipped labels, allow-lists (read tracking among them), block-lists, socket setting and
-stanza guard, editor lock and block delivery (`sites.ts profiledSites`, `profileDomains`). Only the list itself stays as set, and an
-allowed host stays unguarded, profile or not. The blocked GET paths stay with the profiled sites, while a POST page
+stanza guard, editor lock and block delivery (`sites.ts profiledSites`, `profileDomains`). Only the list itself stays
+as set, and an allowed host stays unguarded, profile or not.
+
+While every site is guarded, a site's switch in the popup says whether it is guarded and moves the allowed hosts, not
+the site's own setting (`messages.ts setGuardAllSite`). Off allows the domains that are the site's alone, never a
+shared parent like Calendar's `clients6.google.com` or a domain another site lives under (`sites.ts siteOwnDomains`),
+and switches the site's own setting off, as a switched-on site stays guarded under an allowed host; in Pro mode it
+takes the site off the account's lists instead, as the popup's own switch does there. A site that was on is
+remembered (`guardAllOff`). On takes back only what off adds and the hosts under it, leaving any other allowed host as
+set, and switches the site back on when off switched it off, or should it still be unguarded. The switch is fixed
+where the Pro account (with an own key) or another switched-on site keeps the site guarded, where allowing it would
+also allow another site (a custom `google.com` over Gmail), or where the host is under an address the site shares.
+
+The blocked GET paths stay with the profiled sites, while a POST page
 load is refused on every guarded host and the global socket default covers every guarded host but the sites that allow sockets and the allowed
 hosts (`rules.ts leftOut`: naming the listed sites only would let an unlisted host's socket and a form posting into
 a new tab through). An allowed host at or under a listed site is no exception for any rule, as `guardsHost` guards

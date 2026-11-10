@@ -265,10 +265,11 @@ onOwnedChange((changes, own) => {
  *  covers every other path. */
 async function importGainedVerdicts(prev: Policy, p: Policy): Promise<void> {
   const was = new Set(profiledSites(prev).map((s) => s.id));
-  for (const id of profiledSites(p).map((s) => s.id).filter((x) => !was.has(x))) {
+  // Together: guard every site gains every site at once, and tabs are held only after this.
+  await Promise.all(profiledSites(p).map((s) => s.id).filter((x) => !was.has(x)).map(async (id) => {
     const n = await importSiteVerdicts(id, true).catch(() => 0);
     if (n) system(`site-verdicts-restored:${id}:${n}`);
-  }
+  }));
 }
 
 /** A policy written to storage around the background (protection.ts) that lowers protection while the lock holds: the
