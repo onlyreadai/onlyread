@@ -458,12 +458,15 @@ $('guard-all').addEventListener('change', async (ev) => {
   const box = ev.target as HTMLInputElement;
   await change({ type: 'guard-all:set', on: box.checked });
 });
-$('exclude-add').addEventListener('click', async () => {
+async function excludeSite(): Promise<void> {
   const input = $<HTMLInputElement>('exclude-host');
   const r = await change<{ ok?: boolean; error?: string }>({ type: 'exclude:add', host: input.value });
   $('exclude-result').textContent = r?.error ?? '';
   if (!r?.error) input.value = '';
-});
+}
+$('exclude-add').addEventListener('click', () => void excludeSite());
+// Enter in the box does what the button there does, like the add box further down.
+$('exclude-host').addEventListener('keydown', (e) => { if (e.key === 'Enter') void excludeSite(); });
 
 // ---- Read tracking: changes that only record what was seen, through or refused.
 function renderReadTracking(st: Status): void {
