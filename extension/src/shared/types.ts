@@ -134,13 +134,20 @@ export interface SiteView {
   scopes?: ('account' | 'browser')[];
   /** Pro mode: a change of this site made here has not reached the account yet (it is in force here meanwhile). */
   waiting?: boolean;
+  /** Present while every site is guarded: then the switch says whether the site is guarded (the host the popup is on,
+   *  else any of its domains) and moves this browser's allowed hosts (messages.ts setGuardAllSite), not the site's own
+   *  setting. `fixed`: switching it off here cannot unguard it, as the Pro account's list guards it, the account guards
+   *  every site without allowing it, another switched-on site covers the host (`with`, that site's name), or allowing it
+   *  would allow another site living under it (`shares`, that site's name: a custom google.com over Gmail), or the
+   *  host is under an address the site shares with others (`shared`: Calendar's clients6.google.com). */
+  guardAll?: { on: boolean; fixed?: boolean; with?: string; shares?: string; shared?: boolean };
 }
 
 /** Where a site is added or removed: this browser's own settings, or the Pro account's list (every browser on it). */
 type SiteScope = 'browser' | 'account';
 
-/** One enabled site's own allow-lists, matched only for requests to its domains (decision.ts ruleDecision). Pooled
- *  into the global lists, one site's patterns (Linear's `sentry` and `segment`) would allow a POST on any other guarded
+/** One profiled site's own allow-lists (EffectivePolicy.profileDomains), matched only for requests to its domains
+ *  (decision.ts ruleDecision). Pooled into the global lists, one site's patterns (Linear's `sentry` and `segment`) would allow a POST on any other guarded
  *  host without a judge. */
 export interface SiteRules {
   domains: string[];
@@ -154,6 +161,9 @@ export interface SiteRules {
 export interface EffectivePolicy {
   /** The guarded sites' domains. With `guardAll`, every other host is guarded as well (decision.ts guardsHost). */
   targetDomains: string[];
+  /** The domains every site profile applies on: `targetDomains`, and with `guardAll` every other site's in force but
+   *  the allowed and exempt hosts. The lists below are drawn from the same sites. */
+  profileDomains: string[];
   /** Guard every site except `excludeDomains`: the browser's own setting, or the Pro account's. */
   guardAll: boolean;
   /** With `guardAll`, the hosts left unguarded: allowed at every level that guards everything, and guarded by no list. */
@@ -162,13 +172,14 @@ export interface EffectivePolicy {
   exemptDomains: string[];
   /** The global allow-lists, for every guarded host; a site's own are in `siteRules`, for its domains alone. */
   telemetryAllow: string[];
-  /** The global list plus every enabled site's: a blocked path only blocks more, so pooling costs nothing. */
+  /** The global list plus every profiled site's (profileDomains): a blocked path only blocks more, so pooling costs
+   *  nothing. */
   blockedGetPaths: string[];
-  /** The global list plus every enabled site's: codec write prefixes, blocked wherever they are seen. */
+  /** The global list plus every profiled site's: codec write prefixes, blocked wherever they are seen. */
   blockedShapes: string[];
   allowedShapes: string[];
   readTrackingShapes: string[];
-  /** Each enabled site's own allow-lists with its domains. */
+  /** Each profiled site's own allow-lists with its domains. */
   siteRules: SiteRules[];
   /** Target domains whose WebSockets are blocked: enabled sites that block WS (site setting, else the
    *  global default). A site that allows WS keeps its domains out of this list. Empty → no WS rule. */
@@ -275,6 +286,10 @@ export interface Policy {
   guardAll?: boolean;
   /** With `guardAll`, the hosts this browser leaves unguarded (each with its subdomains). */
   excludeSites?: string[];
+  /** Sites the popup's switch switched off while every site was guarded (their own setting, or their place on the
+   *  account), so that switching them on there puts it back (messages.ts setGuardAllSite). A site's own switch, used
+   *  again, takes it out. */
+  guardAllOff?: string[];
   /**
    * When the extension attaches the debugger (and installs DNR rules).
    * - always (default): attached for the whole browsing session; the debugger banner is persistent.
@@ -358,7 +373,8 @@ export interface AuditEntry {
 }
 
 /** One refused request in a support report: the activity log's entry with its address masked (secret-named query
- *  values and token-like runs) and its body preview as the log already keeps it (redacted, at most 2 KB). */
+ *  values and token-like runs) and its body preview as the log already keeps it (redacted, at most 2 KB), a body of
+ *  bytes named as one (support.ts BINARY_PREVIEW) and a NUL or half an emoji as U+FFFD (support.ts storable). */
 export interface SupportRequest {
   ts: number;
   method: string;
@@ -621,6 +637,8 @@ export type Message =
   | { type: 'sites:list'; host?: string }
   /** `scope: 'account'`: switch the site on or off in the Pro account's list instead of this browser's settings. */
   | { type: 'site:set'; id: string; enabled: boolean; host?: string; scope?: SiteScope }
+  /** popup → background: a site's switch while every site is guarded (SiteView.guardAll): off allows it, on guards it. */
+  | { type: 'site:guard-all'; id: string; on: boolean; host?: string }
   /** `scope: 'account'`: add it to the Pro account's list, for every browser signed in to it. */
   | { type: 'site:add'; host: string; name?: string; iconUrl?: string; scope?: SiteScope }
   /** popup → content script: describe the page (name, icon). */

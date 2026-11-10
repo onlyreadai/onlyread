@@ -175,7 +175,8 @@ export async function retryUnguarded(): Promise<void> {
 /** Should the content script lock rich-text editors on this host right now? Only while actually
  *  enforcing and attached, and only for sites that opted in (editorGuardDomains). */
 export function editorGuardFor(host: string): boolean {
-  return attachmentOn() && S.policy.mode === 'enforce' && isTargetHost(host, S.policy.effective.editorGuardDomains);
+  // guardsHost too: an allowed host under a site guard every site profiles stays unguarded, editors included.
+  return attachmentOn() && S.policy.mode === 'enforce' && guardsHost(S.policy.effective, host) && isTargetHost(host, S.policy.effective.editorGuardDomains);
 }
 
 export interface GuardConfig {

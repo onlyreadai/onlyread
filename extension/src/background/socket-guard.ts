@@ -10,7 +10,7 @@
 // The guard decides in the page (synchronously, so frames keep their order) and reports what it refuses through a
 // binding; those reports land in the Activity log and show the page's notice like any refused request.
 import { buildSocketGuardRule, replaceSessionRule, SOCKET_GUARD_RULE_ID } from './rules';
-import { isTargetHost } from './decision';
+import { guardsHost, isTargetHost } from './decision';
 import { S } from './state';
 import type { Policy, SocketCodec } from '../shared/types';
 
@@ -72,7 +72,8 @@ function source(codec: SocketCodec): Promise<string> {
 /** The guard a site takes, by a URL on it (a page, a worker's script, a blob: worker). */
 function codecFor(url: string, p: Policy = S.policy): SocketCodec | undefined {
   const h = hostOf(url);
-  return h ? p.effective.socketGuards.find((g) => isTargetHost(h, g.domains))?.codec : undefined;
+  // An allowed host under a site guard every site profiles is unguarded: no stanza guard there (guardsHost).
+  return h && guardsHost(p.effective, h) ? p.effective.socketGuards.find((g) => isTargetHost(h, g.domains))?.codec : undefined;
 }
 
 const expressionFor = async (codec: SocketCodec) => guardExpression(await source(codec), guardConfig(codec));

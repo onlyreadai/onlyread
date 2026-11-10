@@ -3,7 +3,7 @@ import { initTheme } from '../shared/theme';
 import { reloadOnDevBuild } from '../shared/dev-reload';
 import { setLockText } from '../shared/lock-text';
 reloadOnDevBuild();
-import { ACCOUNT_ONLY_SWITCH, exclusionLine, popupFooter } from '../shared/status-text';
+import { ACCOUNT_ONLY_SWITCH, GUARD_ALL_ACCOUNT_SWITCH, exclusionLine, popupFooter } from '../shared/status-text';
 import { $, activeWebTab, faviconImg, iconImg, identify, installIconFallbacks, lockedBy, send, type SiteIdentity } from './ui';
 
 installIconFallbacks();
@@ -101,6 +101,17 @@ function accountMark(site: SiteView, pro: boolean): string {
   return site.waiting ? '<span class="saving" role="status" aria-label="Saving to your account" title="Saving to your account"></span>' : '';
 }
 
+/** Under a guard-every-site switch that is fixed: why (SiteView.guardAll). */
+function guardAllNote(site: SiteView, pro: boolean): string {
+  const all = site.guardAll;
+  // In Pro mode the popup changes the account's sites: a fixed switch there has another reason, said below.
+  if (site.account && !pro) return ACCOUNT_ONLY_SWITCH;
+  if (all?.with) return `Guarded with ${all.with}`;
+  if (all?.shares) return `Shares its address with ${all.shares}`;
+  if (all?.shared) return 'Shared address: allow it in settings';
+  return GUARD_ALL_ACCOUNT_SWITCH;
+}
+
 /** The current page belongs to a site OnlyRead knows (verified or added): its switch. In Pro mode it changes the
  *  account's lists (saved there, said under it); with an own key, a site the Pro account guards is changed only on the
  *  account page: its switch is fixed here, with a line saying where. */
@@ -109,13 +120,20 @@ function knownSiteRow(site: SiteView, status: Status): HTMLElement {
   row.className = 'site';
   const pro = proMode(status);
   // An agent's browser is managed from the account alone: no switch moves here.
-  const locked = (site.account && !pro) || (site.enabled && status.lock?.agent) || status.lock?.agentBrowser === true;
-  const note = site.account && site.enabled ? accountMark(site, pro) : '';
+  // Every site guarded: the switch says whether the site is, and allows it or guards it again (site:guard-all).
+  const all = site.guardAll;
+  const on = all ? all.on : site.enabled;
+  const locked = (all ? all.fixed === true : site.account && !pro) || (on && status.lock?.agent) || status.lock?.agentBrowser === true;
+  const note = all?.fixed ? `<span class="sub scope-note"></span>`
+    : !all && site.account && site.enabled ? accountMark(site, pro) : '';
   row.innerHTML =
     '<div class="logo"></div>' +
     `<div class="meta"><div class="name"><span class="n"></span></div><div class="sub"></div>` +
-    `<div class="actions"><label class="switch"><input type="checkbox" ${site.enabled ? 'checked' : ''} ${locked ? 'disabled' : ''}><span></span></label><span class="sub">${site.enabled ? 'On' : 'Off'}</span>${note}</div></div>`;
+    `<div class="actions"><label class="switch"><input type="checkbox" ${on ? 'checked' : ''} ${locked ? 'disabled' : ''}><span></span></label><span class="sub">${on ? 'On' : 'Off'}</span>${note}</div></div>`;
   row.querySelector('.logo')!.append(iconImg(site));
+  // A site name goes in as text, never markup.
+  const why = row.querySelector('.scope-note');
+  if (why && all?.fixed) why.textContent = guardAllNote(site, pro);
   (row.querySelector('.n') as HTMLElement).textContent = site.name;
   // The site's own domains, not their subdomains (x.com, not api.x.com and upload.x.com beside it).
   const mains = site.domains.filter((d) => !site.domains.some((o) => o !== d && d.endsWith(`.${o}`)));
@@ -124,7 +142,8 @@ function knownSiteRow(site: SiteView, status: Status): HTMLElement {
   const excl = exclusionLine(site.outOfScope);
   if (excl) row.querySelector('.meta > .sub')!.after(Object.assign(document.createElement('div'), { className: 'excl', textContent: excl }));
   row.querySelector('input')!.addEventListener('change', (ev) => {
-    void change({ type: 'site:set', id: site.id, enabled: (ev.target as HTMLInputElement).checked, host });
+    const checked = (ev.target as HTMLInputElement).checked;
+    void change(all ? { type: 'site:guard-all', id: site.id, on: checked, host } : { type: 'site:set', id: site.id, enabled: checked, host });
   });
   return row;
 }

@@ -476,7 +476,10 @@ async function moveLocalSites(why: string): Promise<void> {
   // account a setup link signed it in to could be one the agent controls. Its own sites stay its own, guarded.
   if (base.judge.provider !== 'cloud' || !base.managed || S.agentBrowser) return;
   const builtins = Object.entries(base.sites).filter(([, s]) => s.enabled).map(([id]) => id);
-  if (!builtins.length && !base.customSites.length) return;
+  // A custom site the guard-every-site switch took off the account stays here switched off (messages.ts keepCustomCopy),
+  // so that switching it on puts it back there.
+  const kept = (p: Policy) => p.customSites.filter((c) => !c.enabled && (p.guardAllOff ?? []).includes(c.id));
+  if (!builtins.length && base.customSites.length === kept(base).length) return;
   const scope: AccountEdit['scope'] = accountBrowsers(base) <= 1 ? 'account' : 'browser';
   const at = Date.now();
   const edits: AccountEdit[] = [
@@ -484,7 +487,7 @@ async function moveLocalSites(why: string): Promise<void> {
     ...base.customSites.filter((c) => c.enabled && !accountGuards(base, c.id)).map((c): AccountEdit => ({ op: 'add', scope, id: c.id, builtin: false, name: c.name, at })),
   ];
   const sites = Object.fromEntries(Object.keys(base.sites).map((id) => [id, { enabled: false }]));
-  const move = (p: Policy) => normalizePolicy({ ...p, sites: { ...p.sites, ...sites }, customSites: [], accountEdits: [...(p.accountEdits ?? []), ...edits] });
+  const move = (p: Policy) => normalizePolicy({ ...p, sites: { ...p.sites, ...sites }, customSites: kept(p), accountEdits: [...(p.accountEdits ?? []), ...edits] });
   const next = move(base);
   if (weakeningChanges(base, next).length || weakeningChanges(S.policy, move(S.policy)).length) { system(`local-sites:kept (${why}) moving them would lower protection`); return; }
   await setPolicy(next);

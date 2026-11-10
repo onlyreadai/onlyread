@@ -498,8 +498,23 @@ From the harness: `ctl.py sites`, `ctl.py site gmail on|off`, `ctl.py site-add <
 
 The opposite of a site list: every host is guarded except the allowed ones. Hosts OnlyRead has no profile for are
 judged like a custom site (reads pass, clear writes are refused, the rest goes to the AI judge), so their sign-ins and
-searches keep working. The blocked GET paths stay with the listed sites, while a POST page load is refused on every
-guarded host and the global socket default covers every guarded host but the sites that allow sockets and the allowed
+searches keep working. A site OnlyRead does have a profile for gets its whole profile on its hosts, switched on or
+not, as if it were on: its shipped labels, allow-lists (read tracking among them), block-lists, socket setting and
+stanza guard, editor lock and block delivery (`sites.ts profiledSites`, `profileDomains`). Only the list itself stays
+as set, and an allowed host stays unguarded, profile or not.
+
+While every site is guarded, a site's switch in the popup says whether it is guarded and moves the allowed hosts, not
+the site's own setting (`messages.ts setGuardAllSite`). Off allows the domains that are the site's alone, never a
+shared parent like Calendar's `clients6.google.com` or a domain another site lives under (`sites.ts siteOwnDomains`),
+and switches the site's own setting off, as a switched-on site stays guarded under an allowed host; in Pro mode it
+takes the site off the account's lists instead, as the popup's own switch does there. A site that was on is
+remembered (`guardAllOff`). On takes back only what off adds and the hosts under it, leaving any other allowed host as
+set, and switches the site back on when off switched it off, or should it still be unguarded. The switch is fixed
+where the Pro account (with an own key) or another switched-on site keeps the site guarded, where allowing it would
+also allow another site (a custom `google.com` over Gmail), or where the host is under an address the site shares.
+
+The blocked GET paths stay with the profiled sites, while a POST page
+load is refused on every guarded host and the global socket default covers every guarded host but the sites that allow sockets and the allowed
 hosts (`rules.ts leftOut`: naming the listed sites only would let an unlisted host's socket and a form posting into
 a new tab through). An allowed host at or under a listed site is no exception for any rule, as `guardsHost` guards
 it. The browser's own settings set it, and so can a Pro account, each with its own allowed hosts. A higher level is
@@ -663,11 +678,14 @@ sentence), its fingerprint, body shape and body preview, and the last clicks bef
 name only), plus the extension's version and build, mode, when it protects, the judge provider, read tracking and the
 guarded site ids, and the browser's user agent (`background/support.ts`). Addresses are masked before they are shown:
 secret-named query values and token-like runs in each path segment and query value. Body previews are the log's own,
-already redacted when recorded (secret-named keys, token-like runs, card numbers, typed secrets) and at most 2 KB. It
-goes to `POST /v1/support` on `cloud.serviceUrl` whatever the judge provider: with the Pro sign-in when there is one,
-so support sees the account, and anonymously otherwise (an expired sign-in is refreshed, and one the service no longer
-knows is sent without, never signed out over a report). The answer is the report's number, shown to the person. Too
-many reports from one place in an hour are refused (`rate_limited`).
+already redacted when recorded (secret-named keys, token-like runs, card numbers, typed secrets) and at most 2 KB. A
+body of bytes (gzip, an encrypted protocol: `decision.ts binaryBody`) goes as `[binary body, not shown]`, and in any
+text the report carries from the log or the page (preview, fingerprint, body shape, judge's sentence, clicked names,
+note, user agent) a NUL or half an emoji becomes U+FFFD, since the service's Postgres refuses both (`support.ts
+storable`). It goes to `POST /v1/support` on `cloud.serviceUrl` whatever the judge provider: with the Pro sign-in when
+there is one, so support sees the account, and anonymously otherwise (an expired sign-in is refreshed, and one the
+service no longer knows is sent without, never signed out over a report). The answer is the report's number, shown to
+the person. Too many reports from one place in an hour are refused (`rate_limited`).
 
 ## OnlyRead Pro
 

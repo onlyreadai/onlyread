@@ -39,8 +39,10 @@ export class Harness {
   constructor(port: number) { this.port = port; this.base = `http://localhost:${port}`; }
 
   /** `noJudge`: the pages as with no AI judge set (the way to set one, alone); otherwise they show as with one, while the
-   *  judge stays rules-only (messages.ts assumeJudge). */
-  async start(policyPatch: Record<string, unknown>, opts: { extraArgs?: string[]; profileDir?: string; noJudge?: boolean } = {}): Promise<void> {
+   *  judge stays rules-only (messages.ts assumeJudge).
+   *  `windowViewport`: pages take the window's own size and the screen's scaling (as a person's browser does) instead of
+   *  Playwright's fixed viewport, whose emulated scaling never reaches the extension's own frames (another process). */
+  async start(policyPatch: Record<string, unknown>, opts: { extraArgs?: string[]; profileDir?: string; noJudge?: boolean; windowViewport?: boolean } = {}): Promise<void> {
     this.server = spawn(process.execPath, [path.join(ROOT, 'fixtures/testapp/server.ts')], {
       env: { ...process.env, PORT: String(this.port) }, stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -52,7 +54,7 @@ export class Harness {
     fs.mkdirSync(profile, { recursive: true });
     // Google Chrome >= 137 ignores --load-extension; Playwright's Chromium honours it.
     this.ctx = await chromium.launchPersistentContext(profile, {
-      channel: 'chromium', headless: true,
+      channel: 'chromium', headless: true, ...(opts.windowViewport ? { viewport: null } : {}),
       args: [`--disable-extensions-except=${EXT}`, `--load-extension=${EXT}`, '--silent-debugger-extension-api', ...(opts.extraArgs ?? [])],
     });
     this.sw = this.ctx.serviceWorkers()[0] ?? (await this.ctx.waitForEvent('serviceworker'));

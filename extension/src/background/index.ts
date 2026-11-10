@@ -29,7 +29,7 @@ import { loadAgentBrowser, releaseAgentBrowser } from './agent-browser';
 import { cloudSignOut, refreshUninstallUrl } from './cloud-session';
 import { loadLockState } from './lock-state';
 import { unstartedRefusal } from './startup-gate';
-import { guardedSiteIds } from './sites';
+import { profiledSites } from './sites';
 import { initDevControl } from './dev-control';
 import { startDevReload } from './dev-reload';
 import { messageAllowed } from './protection';
@@ -260,14 +260,16 @@ onOwnedChange((changes, own) => {
   });
 });
 
-/** Built-in sites that became guarded (switched on here, or by the Pro account's list) get their shipped labels, so
- *  their reads are not left to the judge. messages.ts setSite imports them too; this covers every other path. */
+/** Built-in sites whose profile came to apply (switched on here, by the Pro account's list, or by guard every site)
+ *  get their shipped labels, so their reads are not left to the judge. messages.ts setSite imports them too; this
+ *  covers every other path. */
 async function importGainedVerdicts(prev: Policy, p: Policy): Promise<void> {
-  const was = new Set(guardedSiteIds(prev));
-  for (const id of guardedSiteIds(p).filter((x) => !was.has(x))) {
+  const was = new Set(profiledSites(prev).map((s) => s.id));
+  // Together: guard every site gains every site at once, and tabs are held only after this.
+  await Promise.all(profiledSites(p).map((s) => s.id).filter((x) => !was.has(x)).map(async (id) => {
     const n = await importSiteVerdicts(id, true).catch(() => 0);
     if (n) system(`site-verdicts-restored:${id}:${n}`);
-  }
+  }));
 }
 
 /** A policy written to storage around the background (protection.ts) that lowers protection while the lock holds: the
@@ -323,7 +325,7 @@ async function applyPolicy(p: Policy, own: boolean, old?: Policy): Promise<void>
   // tabs only (never the user's other open tabs, though the debugger attaches to those too).
   const reload = new Map<number, string>();
   if (prev.mode !== p.mode) {
-    for (const tabId of tabsToReloadOnModeChange(prev, p, await tabUrls(dbg.attachedTabs()), p.effective.targetDomains)) reload.set(tabId, `mode-change-reload:${p.mode}`);
+    for (const tabId of tabsToReloadOnModeChange(prev, p, await tabUrls(dbg.attachedTabs()), p.effective.profileDomains)) reload.set(tabId, `mode-change-reload:${p.mode}`);
   }
   // A site whose pages carry the socket guard, switched off: its open pages reload without it. Every open tab of the
   // site, not only the ones this run armed: the guard may be in a page from before a restart of the background.

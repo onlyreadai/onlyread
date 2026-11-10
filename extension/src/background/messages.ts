@@ -1,11 +1,11 @@
 // Messages from the popup, the options and setup pages and the content script.
-import type { AccountEdit, Message, Policy, Status, SupportList } from '../shared/types';
+import type { AccountEdit, Message, Policy, SiteView, Status, SupportList } from '../shared/types';
 import { writeConsent } from './consent';
 import { afterDemoPolicy, beginDemo, demoExpired, demoPolicy, demoState, endDemo, onDemoSite, setDemoTab, whenDemoStops } from './demo';
 import { DEMO_SITES, demoSite } from '../shared/demo-sites';
 import { RELEASE_SERVICE_URL, carryManaged, devBuild, devMockServiceUrl, lastWrittenPolicy, normalizePolicy, setPolicy } from './policy';
 import { guardsHost, isTargetHost } from './decision';
-import { accountGuards, accountScopesOf, excludeHost, builtinForHost, builtinSite, hostToSiteId, isPublicSuffix, listSites, sitesInForce, validHost } from './sites';
+import { accountGuards, accountScopesOf, excludeHost, builtinForHost, builtinSite, hostToSiteId, isPublicSuffix, listSites, profiledSites, sitesInForce, validHost, allowedOff, siteAllowHosts, withAccountRemove } from './sites';
 import { discoverSite } from './site-discover';
 import { nameFromHost } from '../shared/names';
 import { PROVIDERS, isKeyId, isProviderId, keyFor, type ByokChoice } from '../shared/providers';
@@ -264,11 +264,11 @@ export async function importSiteVerdicts(id: string, missingOnly = false): Promi
   return puts.length;
 }
 
-/** Every switched-on site's shipped labels, back in the cache: they are the product's own data, so neither a
- *  cleared cache nor an older install may leave a verified site to the judge alone. */
+/** Every profiled site's shipped labels (switched on, or any under guard every site), back in the cache: they are the
+ *  product's own data, so neither a cleared cache nor an older install may leave a verified site to the judge alone. */
 export async function restoreSiteVerdicts(missingOnly: boolean): Promise<number> {
   let n = 0;
-  for (const [id, s] of Object.entries(sitesInForce(S.policy).sites)) if (s.enabled) n += await importSiteVerdicts(id, missingOnly);
+  for (const s of profiledSites(S.policy)) n += await importSiteVerdicts(s.id, missingOnly);
   return n;
 }
 
@@ -441,22 +441,6 @@ function withAccountAdd(p: Policy, id: string, builtin: boolean, name: string | 
   return { ...p, accountEdits: [...(p.accountEdits ?? []), edit] };
 }
 
-/** `p` with the site off the account's lists (one asked for, or each that guards it): an addition still waiting is
- *  taken back, and the list the account has gets a removal made against the version this browser last saw. A site this
- *  browser's own list still guards (an install from before the move, cloud-sync.ts moveLocalSites) is switched off too. */
-function withAccountRemove(p: Policy, id: string, scope?: AccountEdit['scope']): Policy {
-  const mine = (e: AccountEdit) => e.id === id && e.op === 'add' && (!scope || e.scope === scope);
-  const kept = (p.accountEdits ?? []).filter((e) => !mine(e));
-  const onAccount = accountScopesOf({ sites: {}, customSites: [], managed: p.managed }, id).filter((s) => !scope || s === scope);
-  const builtin = Boolean(builtinSite(id));
-  const removals = onAccount.map((s): AccountEdit => {
-    const version = s === 'account' ? p.managed?.version : p.managed?.browserVersion;
-    return { op: 'remove', scope: s, id, builtin, ...(version !== undefined ? { version } : {}), at: Date.now() };
-  });
-  const sites = p.sites[id]?.enabled ? { ...p.sites, [id]: { enabled: false } } : p.sites;
-  return { ...p, sites, customSites: p.customSites.filter((c) => c.id !== id), accountEdits: [...kept, ...removals] };
-}
-
 /** Saves a Pro-mode site change (through the lock, like any) and sends it to the account. */
 async function saveAccountEdit(next: Policy): Promise<Policy> {
   const saved = await save(next);
@@ -508,8 +492,64 @@ async function addAccountSite(policy: Policy, msg: Of<'site:add'>, id: string) {
   return listSites(saved, msg.host);
 }
 
-async function setSite(msg: Of<'site:set'>) {
+/** A site's switch while every site is guarded (SiteView.guardAll). Off adds its domains to this browser's allowed hosts
+ *  and switches its own setting here off, since a switched-on site stays guarded under an allowed host. On takes back
+ *  the allowed hosts off would add and those under them (siteAllowHosts), leaving any other the user set, and switches
+ *  the site on again when off switched it off (guardAllOff), or should it still be unguarded (under an allowed parent,
+ *  or the account guarding every site but allowing it). In Pro mode off also takes a site off the account's lists, and
+ *  switching on puts it back there. Both through the lock (save, protection.ts). */
+async function setGuardAllSite(msg: Of<'site:guard-all'>) {
   const policy = latest();
+  const site = listSites(policy, msg.host).find((s) => s.id === msg.id);
+  if (!site?.guardAll) return listSites(policy, msg.host);
+  return msg.on ? guardAllSiteOn(policy, site, msg) : guardAllSiteOff(policy, site, msg);
+}
+
+/** A custom site taken off the account's lists by the guard-every-site switch is kept here switched off, as it was
+ *  listed: its row stays in the popup, and switching it on puts it back on the account with its name (setAccountSite).
+ *  withAccountRemove drops it here otherwise, leaving it on no list. cloud-sync.ts moveLocalSites keeps such a copy. */
+function keepCustomCopy(p: Policy, site: SiteView): Policy {
+  if (site.builtin || p.customSites.some((c) => c.id === site.id)) return p;
+  return { ...p, customSites: [...p.customSites, { id: site.id, name: site.name, domains: site.domains, enabled: false, ...(site.iconUrl ? { iconUrl: site.iconUrl } : {}) }] };
+}
+
+/** Why a guard-every-site switch cannot be switched off (SiteView.guardAll), in words. */
+function guardAllRefusal(all: NonNullable<SiteView['guardAll']>): string {
+  if (all.with) return `${all.with} keeps this site guarded. Switch ${all.with} off first.`;
+  if (all.shares) return `Allowing this site would also allow ${all.shares}. Allow its hosts in settings instead.`;
+  if (all.shared) return 'This address is shared with other sites. Allow it in settings instead.';
+  return 'Your OnlyRead Pro account keeps this site guarded. Change it on your account page.';
+}
+
+async function guardAllSiteOff(policy: Policy, site: SiteView, msg: Of<'site:guard-all'>) {
+  // In Pro mode a site on the account's lists comes off them too, as the popup's own switch does there.
+  const fromAccount = proMode(policy) && site.account;
+  const allowed = allowedOff(fromAccount ? keepCustomCopy(withAccountRemove(policy, msg.id), site) : policy, msg.id, site.domains, msg.host);
+  // Nothing is saved that would leave the site guarded where the popup is (the switch would spring back on).
+  if (site.guardAll!.fixed || listSites(allowed, msg.host).find((s) => s.id === msg.id)?.guardAll?.on) return { ok: false, error: guardAllRefusal(site.guardAll!) };
+  // A site that was on (its own setting, or the account's list) is remembered, for on to put it back.
+  const off = policy.guardAllOff ?? [];
+  const next = site.enabled && !off.includes(msg.id) ? { ...allowed, guardAllOff: [...off, msg.id] } : allowed;
+  const saved = fromAccount ? await saveAccountEdit(next) : await save(next);
+  system(`guard-all:site-allowed ${msg.id}`);
+  return listSites(saved, msg.host);
+}
+
+async function guardAllSiteOn(policy: Policy, site: SiteView, msg: Of<'site:guard-all'>) {
+  const own = siteAllowHosts(policy, msg.id, site.domains, msg.host);
+  const wasOn = (policy.guardAllOff ?? []).includes(msg.id);
+  const saved = await save({ ...policy, excludeSites: (policy.excludeSites ?? []).filter((e) => !isTargetHost(e, own)), guardAllOff: (policy.guardAllOff ?? []).filter((x) => x !== msg.id) });
+  system(`guard-all:site-guarded ${msg.id}`);
+  // Switched back on: what off switched off (its own setting, or the account's list in Pro mode), and a site still
+  // unguarded here (under an allowed parent, or the account allowing it) is switched on.
+  if (wasOn || !listSites(saved, msg.host).find((s) => s.id === msg.id)?.guardAll?.on) return setSite({ type: 'site:set', id: msg.id, enabled: true, host: msg.host });
+  return listSites(saved, msg.host);
+}
+
+async function setSite(msg: Of<'site:set'>) {
+  const remembered = latest();
+  // The site's own switch decides now: what the guard-every-site switch remembered of it goes.
+  const policy = (remembered.guardAllOff ?? []).includes(msg.id) ? { ...remembered, guardAllOff: remembered.guardAllOff!.filter((x) => x !== msg.id) } : remembered;
   const builtin = builtinSite(msg.id);
   if (proMode(policy)) return setAccountSite(policy, msg);
   if (msg.scope === 'account') return ACCOUNT_EDITS_ELSEWHERE;
@@ -554,7 +594,14 @@ async function excludeSite(msg: Of<'exclude:add'>) {
 async function includeSite(msg: Of<'exclude:remove'>) {
   const saved = await save({ ...latest(), excludeSites: (latest().excludeSites ?? []).filter((h) => h !== msg.host) });
   system(`exclude:remove ${String(msg.host).slice(0, 100)}`);
-  return guardAllView(saved);
+  // A site the guard-every-site switch switched off, allowed by this host: guarded again here, it is switched back on
+  // as that switch's on would, so turning guard every site off later does not leave it unguarded.
+  const views = listSites(saved);
+  for (const id of saved.guardAllOff ?? []) {
+    const v = views.find((s) => s.id === id);
+    if (v && siteAllowHosts(saved, id, v.domains).includes(String(msg.host))) await setSite({ type: 'site:set', id, enabled: true });
+  }
+  return guardAllView(latest());
 }
 
 async function addSite(msg: Of<'site:add'>) {
@@ -1423,6 +1470,7 @@ const HANDLERS: Handlers = {
   'cache:import': importCache,
   'sites:list': (msg) => listSites(S.policy, msg.host),
   'site:set': accountManaged(setSite),
+  'site:guard-all': accountManaged(setGuardAllSite),
   'site:add': accountManaged(addSite),
   'guard-all:set': accountManaged(setGuardAll),
   'read-tracking:set': setReadTracking,

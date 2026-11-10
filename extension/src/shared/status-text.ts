@@ -38,6 +38,9 @@ export function popupFooter(st: StatusLike): { text: string; warn: boolean } {
  *  browser signed in to it, and this line says so. */
 export const ACCOUNT_ONLY_SWITCH = 'Managed on your Pro account page';
 
+/** Under the switch of a site the Pro account guards by guarding every site without allowing it: fixed here. */
+export const GUARD_ALL_ACCOUNT_SWITCH = 'Every site is guarded by your Pro account';
+
 /** A site row's one line: the first sentence of its description, or the judge-only note. The note says what the site
  *  is, not what is happening to it: the row may be switched off, or the browser in monitor mode or with protection
  *  off, where nothing is refused. OnlyRead Pro's lib/managed.ts siteSummary says the same. */

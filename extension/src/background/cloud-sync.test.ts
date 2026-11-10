@@ -771,6 +771,14 @@ describe('Pro mode: this browser\'s site changes go to the account', () => {
     expect(log.filter((l) => l.includes('settings-locked'))).toEqual([]);
   });
 
+  it('keeps a custom site the guard-every-site switch took off the account here, switched off, moving nothing', async () => {
+    const tools = { id: 'tools.example.net', name: 'Tools', domains: ['tools.example.net'], enabled: false };
+    await pro({ customSites: [tools], guardAllOff: ['tools.example.net'] });
+    await sync('signed-in');
+    expect(S.policy.customSites).toEqual([tools]);
+    expect(sent()).toEqual([]);
+  });
+
   it("in an agent's browser its own sites stay its own: none move to the account", async () => {
     S.agentBrowser = true;
     try {

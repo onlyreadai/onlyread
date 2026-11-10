@@ -4,6 +4,7 @@
 // service, whose /__frames page stands in for the account page.
 import { test, expect } from '@playwright/test';
 import { Harness } from './helpers';
+import { openFramed } from './framed-dialog';
 
 test.describe.configure({ mode: 'serial' });
 
@@ -66,6 +67,53 @@ test('signed in, the account\'s page frames Activity and Security, sized to thei
     try { return f.contentDocument === null && f.contentWindow?.document === undefined; } catch { return true; }
   })).toBe(true);
   await page.close();
+});
+
+// A dialog in the framed section (the report, the PIN) is the window's, however short the section: while it is open the
+// frame covers the page's whole window, its spot on the page keeping its height and the section drawn there still;
+// the section follows its spot as the page scrolls or the window is resized; closed, the frame is back in its spot at
+// its own height. At any display scaling: the frame tells "covering" from its own size in the page, not the window's
+// exact size, which a fractional scale never matches.
+test('a dialog opened in the framed section covers the whole window, follows a scroll and a resize, and goes back when it closes', async () => {
+  const f = await openFramed(h, framesPage('test.user@example.com'), { width: 1200, height: 800 });
+  await f.show();
+  await f.covering();
+  expect((await f.spot.boundingBox())!.height).toBeCloseTo(f.before.spot.height, 0);
+  // The page scrolled under the open dialog (a wheel over the dimmed page): the section moves with its spot.
+  await f.page.evaluate(() => { document.body.style.paddingBottom = '2000px'; scrollBy(0, 120); });
+  expect((await f.spot.boundingBox())!.y).toBeCloseTo(f.before.spot.y - 120, 0);
+  await f.covering();
+  await f.page.evaluate(() => { scrollTo(0, 0); document.body.style.paddingBottom = ''; });
+  // The window resized under it.
+  await f.resize(1000, 700);
+  await f.covering();
+  await f.resize(1200, 800);
+  await f.close();
+  await f.back();
+  await f.page.close();
+});
+
+// The spot measured from the frame itself, not the placeholder around it: padded or bordered by the account page, the
+// section still stays where it was and the dialog still waits for the cover.
+test('with the placeholder padded and bordered, a dialog covers the window and the section stays in place', async () => {
+  const f = await openFramed(h, framesPage('test.user@example.com'), { width: 1200, height: 800 }, 'padding: 14px 30px; border: 3px solid red;');
+  await f.show();
+  await f.covering();
+  expect((await f.spot.boundingBox())!.height).toBeCloseTo(f.before.spot.height, 0);
+  await f.close();
+  await f.back();
+  await f.page.close();
+});
+
+test('a dialog closed and opened again at once covers the window as the first did', async () => {
+  const f = await openFramed(h, framesPage('test.user@example.com'), { width: 1200, height: 800 });
+  await f.show();
+  await f.covering();
+  await f.show(true); // never seen clipped while the frame shrinks back and grows again
+  await f.covering();
+  await f.close();
+  await f.back();
+  await f.page.close();
 });
 
 // The account page's "Try the demo" (in Pro mode this browser's own settings page is out of the way): a real click opens

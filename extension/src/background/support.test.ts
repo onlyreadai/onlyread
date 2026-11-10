@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { AuditEntry, SiteView } from '../shared/types';
 import { defaultPolicy } from './policy';
 import { entryKey } from './activity';
-import { BURST_MS, SUPPORT_MAX, buildReport, supportBurst, cleanEmail, maskUrl, supportContext, supportItems, supportRequest } from './support';
+import { BINARY_PREVIEW, BURST_MS, SUPPORT_MAX, buildReport, supportBurst, cleanEmail, maskUrl, supportContext, supportItems, supportRequest } from './support';
 
 const TOKEN = 'AbCdEf0123456789GhIjKlMnOpQrStUv';
 const entry = (over: Partial<AuditEntry> = {}): AuditEntry => ({
@@ -23,6 +23,30 @@ describe('support reports', () => {
     expect(r).toMatchObject({ method: 'POST', verdict: 'block', source: 'jev', reason: 'jev', pWrite: 0.9, bodyPreview: '{"a":1}', lastUiActions: [{ type: 'click', tag: 'button', name: 'Like' }] });
     expect(r.judgeReason).toHaveLength(300);
     expect(r.lastUiActions?.[0]).not.toHaveProperty('url');
+  });
+
+  it('carries a body of bytes (gzip, as a LinkedIn write can be) as a note that it was binary, not the bytes', () => {
+    expect(supportRequest(entry({ bodyPreview: '\u001f\u008b\b\u0000\u0000\u0000\u0000\u0000\u0000\u0003' })).bodyPreview).toBe(BINARY_PREVIEW);
+    expect(supportRequest(entry({ bodyPreview: '\u0001\u0002\u0003\u0000abc' })).bodyPreview).toBe(BINARY_PREVIEW);
+  });
+
+  it('keeps a mostly-text body as text, with what the service cannot store (NUL, half an emoji) replaced', () => {
+    const text = `--b\r\nContent-Disposition: form-data; name="f"\r\n\r\n${'x'.repeat(600)}\u0000\u0001😀`;
+    expect(supportRequest(entry({ bodyPreview: text })).bodyPreview).toBe(text.replace('\u0000', '\uFFFD'));
+    expect(supportRequest(entry({ bodyPreview: `{"a":"${'y'.repeat(20)}\uD83D…` })).bodyPreview).toBe(`{"a":"${'y'.repeat(20)}\uFFFD…`);
+    expect(supportRequest(entry({ bodyPreview: '\uDE00 and 😀' })).bodyPreview).toBe('\uFFFD and 😀');
+  });
+
+  it('keeps the fingerprint and body shape storable when the body\'s own keys hold NUL or half an emoji', () => {
+    const r = supportRequest(entry({ fingerprint: 'POST www.linkedin.com/x json:a\u0000b', bodyShape: 'json:a\u0000b,\uD83D' }));
+    expect(r.fingerprint).toBe('POST www.linkedin.com/x json:a\uFFFDb');
+    expect(r.bodyShape).toBe('json:a\uFFFDb,\uFFFD');
+  });
+
+  it('cuts the judge\'s sentence and a clicked name to their sizes without leaving half an emoji', () => {
+    const r = supportRequest(entry({ judgeReason: `${'x'.repeat(299)}😀`, lastUiActions: [{ ts: 1, type: 'click', tag: 'button', name: `${'n'.repeat(79)}👍`, url: 'https://www.linkedin.com/feed/' }] }));
+    expect(r.judgeReason).toBe(`${'x'.repeat(299)}\uFFFD`);
+    expect(r.lastUiActions?.[0]?.name).toBe(`${'n'.repeat(79)}\uFFFD`);
   });
 
   it('keeps the three actions nearest the request, the list being newest first', () => {

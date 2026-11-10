@@ -135,6 +135,46 @@ describe('a site OnlyRead knows', () => {
     expect(subs()).toEqual(['Off']);
   });
 
+  // Every site guarded: the switch says whether the site is guarded, and allows it or guards it again.
+  it('while every site is guarded, the switch allows the site or guards it again, and is fixed where the account holds it', async () => {
+    const input = () => row().querySelector<HTMLInputElement>('input[type="checkbox"]')!;
+    answers.sites = [view({ enabled: false, local: false, account: false, guardAll: { on: true } })];
+    await refreshed();
+    expect(subs()).toEqual(['On']);
+    expect([input().checked, input().disabled]).toEqual([true, false]);
+    flip(false);
+    await refreshed();
+    expect(sent.at(-1)).toEqual({ type: 'site:guard-all', id: 'app.example.com', on: false, host: 'app.example.com' });
+    answers.sites = [view({ enabled: false, local: false, account: false, guardAll: { on: false } })];
+    await refreshed();
+    expect(subs()).toEqual(['Off']);
+    flip(true);
+    await refreshed();
+    expect(sent.at(-1)).toEqual({ type: 'site:guard-all', id: 'app.example.com', on: true, host: 'app.example.com' });
+    // Held by the account: fixed, saying where.
+    answers.sites = [view({ enabled: false, local: false, account: false, guardAll: { on: true, fixed: true } })];
+    await refreshed();
+    expect(subs()).toEqual(['On', 'Every site is guarded by your Pro account']);
+    expect(input().disabled).toBe(true);
+    answers.sites = [view({ local: false, account: true, guardAll: { on: true, fixed: true } })];
+    await refreshed();
+    expect(subs()).toEqual(['On', 'Managed on your Pro account page']);
+    answers.sites = [view({ enabled: false, local: false, account: false, guardAll: { on: true, fixed: true, with: 'Gmail' } })];
+    await refreshed();
+    expect(subs()).toEqual(['On', 'Guarded with Gmail']);
+    answers.sites = [view({ enabled: false, local: true, account: false, guardAll: { on: true, fixed: true, shares: 'Gmail' } })];
+    await refreshed();
+    expect(subs()).toEqual(['On', 'Shares its address with Gmail']);
+    answers.sites = [view({ enabled: false, local: false, account: false, guardAll: { on: true, fixed: true, shared: true } })];
+    await refreshed();
+    expect(subs()).toEqual(['On', 'Shared address: allow it in settings']);
+    // Pro mode: an account site fixed for another reason says that reason, not the account page.
+    answers.status = status({ managed: { version: 3, at: 1 } });
+    answers.sites = [view({ enabled: true, local: false, account: true, guardAll: { on: true, fixed: true, with: 'Gmail' } })];
+    await refreshed();
+    expect(subs()).toEqual(['On', 'Guarded with Gmail']);
+  });
+
   // Pro mode (a Pro judge, signed in, the account's lists in force): the switch changes the account's lists.
   it('in Pro mode a site on the account switches here, with a spinner while its change is on its way and no words', async () => {
     answers.status = status({ managed: { version: 3, at: 1 } });

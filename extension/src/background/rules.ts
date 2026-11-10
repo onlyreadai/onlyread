@@ -80,7 +80,7 @@ const hostOfOrigin = (origin: string): string => { try { return new URL(origin).
 
 /** The effective policy as dnrReasonFor reads it: the blocked GET paths, and for a socket the fields the socket rule is
  *  built from (optional, so a caller that labels no sockets need not carry them). */
-type DnrEffective = Pick<EffectivePolicy, 'blockedGetPaths'> & Partial<Pick<EffectivePolicy, 'guardAll' | 'excludeDomains' | 'exemptDomains' | 'websocketBlockDomains' | 'websocketAllowDomains' | 'telemetryAllow' | 'siteRules'>>;
+type DnrEffective = Pick<EffectivePolicy, 'blockedGetPaths'> & Partial<Pick<EffectivePolicy, 'targetDomains' | 'guardAll' | 'excludeDomains' | 'exemptDomains' | 'websocketBlockDomains' | 'websocketAllowDomains' | 'telemetryAllow' | 'siteRules'>>;
 
 /** Whether `host` is one of `domains` or under one, as a DNR domain condition matches it. */
 const underAny = (host: string, domains: string[]): boolean => domains.some((d) => host === d || host.endsWith(`.${d}`));
@@ -92,9 +92,12 @@ const underAny = (host: string, domains: string[]): boolean => domains.some((d) 
 function websocketRefused(host: string, eff: DnrEffective, websockets: 'block' | 'allow' | undefined): boolean {
   const wsDomains = normalizeDomains(eff.websocketBlockDomains ?? []);
   if (eff.guardAll && (websockets ?? 'block') === 'block') {
-    return !underAny(host, leftOut({ excludeDomains: eff.excludeDomains ?? [], exemptDomains: eff.exemptDomains ?? [] }, eff.websocketAllowDomains ?? [], wsDomains));
+    const listed = normalizeDomains(eff.targetDomains ?? []);
+    return !underAny(host, leftOut({ excludeDomains: eff.excludeDomains ?? [], exemptDomains: eff.exemptDomains ?? [] }, eff.websocketAllowDomains ?? [], wsDomains.filter((d) => underAny(d, listed))));
   }
-  return underAny(host, wsDomains);
+  // Under guard every site an allowed host stays out, unless a listed site covers it (buildRules `freed`).
+  const freed = eff.guardAll ? leftOut({ excludeDomains: eff.excludeDomains ?? [], exemptDomains: eff.exemptDomains ?? [] }, [], normalizeDomains(eff.targetDomains ?? [])) : [];
+  return underAny(host, wsDomains) && !underAny(host, freed);
 }
 
 /** What may follow a telemetry endpoint (a telemetryAllow pattern with a path in it) before the query, fragment or end:
@@ -354,9 +357,10 @@ export function buildRules(policy: Policy, opts: { failClosed?: boolean } = {}):
   const reasons = new Map<number, string>();
   const guarded = guardedDomains(policy);
   if (!guarded) return { rules, reasons };
-  // The guarded sites' own domains: the rules that know a site (a POST page load, its GET paths) apply to them only.
-  // Every other host that guarding everything takes in is judged by the debugger, sign-ins and searches included.
-  const domains = normalizeDomains(policy.effective.targetDomains);
+  // The profiled sites' own domains (the listed ones, and under guard every site every other site's): the rules that
+  // know a site (its GET paths) apply to them only. Every other host guarding everything takes in is judged by the
+  // debugger, sign-ins and searches included.
+  const domains = normalizeDomains(policy.effective.profileDomains);
 
   if (opts.failClosed) {
     // Two halves: the POSTs, leaving out the background's own (its judge must answer while the tabs are attached), and
@@ -410,11 +414,18 @@ export function buildRules(policy: Policy, opts: { failClosed?: boolean } = {}):
   // WebSockets are blocked only for the guarded domains that opt to block them (per-site, else the
   // global default). A site whose real-time reads ride a socket (Linear) keeps its domains out.
   const wsDomains = normalizeDomains(policy.effective.websocketBlockDomains);
+  // An allowed host under a site guard every site profiles stays unguarded: out of that site's socket and GET-path rules
+  // (one under a listed site stays guarded, guardsHost).
+  const freed = policy.effective.guardAll ? leftOut(policy.effective, [], normalizeDomains(policy.effective.targetDomains)) : [];
+  // A rule's exclusions: the freed hosts under its own domains (one elsewhere it never matches anyway).
+  const freedUnder = (ds: string[]) => { const out = freed.filter((a) => underAny(a, ds)); return out.length ? { excludedRequestDomains: out } : {}; };
   if (policy.effective.guardAll && (policy.websockets ?? 'block') === 'block') {
     // Everything guarded: the global default refuses sockets on every guarded host, the sites that allow them and
     // the allowed and exempt hosts left out, so an unlisted host's socket, which the debugger never inspects, cannot
     // carry writes.
-    const out = leftOut(policy.effective, policy.effective.websocketAllowDomains, wsDomains);
+    // Only a listed site keeps an allowed host under it guarded; one guard every site profiles leaves it out.
+    const listed = normalizeDomains(policy.effective.targetDomains);
+    const out = leftOut(policy.effective, policy.effective.websocketAllowDomains, wsDomains.filter((d) => underAny(d, listed)));
     rules.push({
       id, priority: 100, action: block,
       condition: { ...(out.length ? { excludedRequestDomains: out } : {}), resourceTypes: ['websocket', 'webtransport'] },
@@ -425,7 +436,7 @@ export function buildRules(policy: Policy, opts: { failClosed?: boolean } = {}):
       id, priority: 100, action: block,
       // WebTransport (HTTP/3) is the same class of channel: Facebook's gateway falls back to it when its
       // websockets are blocked and carried Messenger sends that way. webRequest never reports these sessions.
-      condition: { requestDomains: wsDomains, resourceTypes: ['websocket', 'webtransport'] },
+      condition: { requestDomains: wsDomains, ...freedUnder(wsDomains), resourceTypes: ['websocket', 'webtransport'] },
     });
     reasons.set(id++, 'websocket');
   }
@@ -438,7 +449,7 @@ export function buildRules(policy: Policy, opts: { failClosed?: boolean } = {}):
     // Side-effecting GETs are navigations and API calls, never scripts or images.
     rules.push({
       id, priority: 100, action: block,
-      condition: { urlFilter: `${p}^`, requestDomains: domains, requestMethods: ['get'], resourceTypes: SIDE_EFFECT_TYPES },
+      condition: { urlFilter: `${p}^`, requestDomains: domains, ...freedUnder(domains), requestMethods: ['get'], resourceTypes: SIDE_EFFECT_TYPES },
     });
     reasons.set(id++, `blocked-get-path:${p}`);
   }
