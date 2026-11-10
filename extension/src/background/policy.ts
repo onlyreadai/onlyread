@@ -15,34 +15,54 @@ declare const __ONLYREAD_DIST__: boolean;
 function distBuild(): boolean {
   try { return __ONLYREAD_DIST__ === true; } catch { return false; }
 }
-declare const __ONLYREAD_DEV_SERVICE__: string;
-/** A development build built to start on the real Pro service (ONLYREAD_DEV_SERVICE=production, scripts/build.mjs). */
-function devOnProduction(): boolean {
-  try { return __ONLYREAD_DEV_SERVICE__ === 'production'; } catch { return false; }
+declare const __ONLYREAD_SERVICE_URL__: string;
+/** The Pro service the build was made for (ONLYREAD_SERVICE_URL, scripts/build.mjs checks it), or '' for none. */
+function builtFor(): string {
+  try { return __ONLYREAD_SERVICE_URL__ || ''; } catch { return ''; }
 }
-
-/** A local mock Pro service's address (the fixture server), as a development build may have stored it. */
-const LOCAL_SERVICE = /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?\//;
-
-/** A development build made against production (ONLYREAD_DEV_SERVICE=production) that finds the local mock's address
- *  stored from an earlier build: the address to move to, once (index.ts). Undefined otherwise. Later choices, the
- *  settings page's Pro service or a test's, stand. */
-export function devServiceMove(p: Policy, moved: boolean): string | undefined {
-  if (moved || distBuild() || !devOnProduction() || !LOCAL_SERVICE.test(p.cloud.serviceUrl)) return undefined;
-  return RELEASE_SERVICE_URL;
-}
+/** A release's Pro service in place of the store's, or '' for none. */
+function serviceOverride(): string { return distBuild() ? builtFor() : ''; }
+/** A development build's Pro service in place of the local mock, or '' for none. */
+function devServiceChoice(): string { return distBuild() ? '' : builtFor(); }
 
 /** Development builds (unpacked from the repo) expose Monitor mode for adding a site; releases always enforce. */
 export function devBuild(): boolean { return !distBuild(); }
 
-/** The real OnlyRead Pro service, as a release uses it (policy/default.json). */
+/** The real OnlyRead Pro service, as a store release uses it (policy/default.json). */
 export const RELEASE_SERVICE_URL: string = (defaults as Policy).cloud.serviceUrl;
+
+/** The Pro service this release is locked to: the build's override (a test release), or the store's. */
+export function buildServiceUrl(): string { return serviceOverride() || RELEASE_SERVICE_URL; }
+
+/** A release built for another Pro service (harness/bundle.py --service-url): a test release, under its own name and
+ *  with a badge on its toolbar icon (audit.ts clearBadge). */
+export function devRelease(): boolean { return serviceOverride() !== ''; }
 
 /** The local mock Pro backend a development build defaults to: the fixture server (fixtures/cloud/mock.ts), on the
  *  dev sink's host. Derived rather than written out, so no localhost address reaches a release bundle. */
 export function devMockServiceUrl(devSink: string | null | undefined): string | undefined {
   if (!devSink) return undefined;
   try { return new URL('/cloud', devSink).toString().replace(/\/$/, ''); } catch { return undefined; }
+}
+
+/** A development build on the local mock: made without ONLYREAD_SERVICE_URL. Only such a build's sign-in falls back
+ *  to the store's service when the mock is not running (cloud-session.ts signInFallback). */
+export function devServiceLocal(): boolean { return !distBuild() && !devServiceChoice(); }
+
+/** A development build's Pro service: the address it was made for, or the local mock on the dev sink's host. Undefined
+ *  in a release, and for the mock with no dev sink. */
+export function devServiceUrl(devSink: string | null | undefined): string | undefined {
+  if (distBuild()) return undefined;
+  return devServiceChoice() || devMockServiceUrl(devSink);
+}
+
+/** The service a development build made with ONLYREAD_SERVICE_URL moves the saved policy to when it starts, or
+ *  undefined to keep it (messages.ts applyBuildService). The build's wins: there is no choice in settings. A build made
+ *  without it (the e2e suites, harness/bundle.py's restored build) keeps what is saved, so building the plain way never
+ *  moves a browser off the service it uses, nor off the store's service its mock sign-in fell back to. */
+export function devServiceSwitch(p: Pick<Policy, 'cloud'>): string | undefined {
+  const to = devServiceChoice();
+  return to && p.cloud.serviceUrl.replace(/\/$/, '') !== to ? to : undefined;
 }
 
 export function defaultPolicy(): Policy {
@@ -55,11 +75,12 @@ export function defaultPolicy(): Policy {
     // Releases always enforce; Monitor is a development tool.
     d.devSink = null;
     d.mode = 'enforce';
+    d.cloud.serviceUrl = buildServiceUrl();
   } else {
-    // Dev builds talk to the mock Pro backend in the fixture server; a sign-in falls back to the real service when
-    // the mock does not answer (cloud-session.ts signInFallback). Built with ONLYREAD_DEV_SERVICE=production, the real
-    // one from the start.
-    if (!devOnProduction()) d.cloud.serviceUrl = devMockServiceUrl(d.devSink) ?? d.cloud.serviceUrl;
+    // Dev builds start on the service they were made for (ONLYREAD_SERVICE_URL), by default the mock Pro backend in the
+    // fixture server, whose sign-in falls back to the real service when the mock does not answer (cloud-session.ts
+    // signInFallback).
+    d.cloud.serviceUrl = devServiceUrl(d.devSink) ?? d.cloud.serviceUrl;
   }
   return d;
 }
@@ -82,8 +103,12 @@ type PolicyCheck = [ok: (p: Policy) => boolean, message: (p: Policy) => string];
 const inRange = (lo: number, hi: number) => lo >= 0 && lo <= hi && hi <= 1;
 const HTTPS_URL = /^https:\/\/[^/]+/;
 const DEV_SERVICE_URL = /^https:\/\/[^/]+|^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/;
-/** A release talks to OnlyRead Pro over https only; a development build may also use the local mock. */
-const safeServiceUrl = (url: string): boolean => (distBuild() ? HTTPS_URL : DEV_SERVICE_URL).test(url);
+/** A release talks to OnlyRead Pro over https only, a test release exactly to the service it was built for; a
+ *  development build may also use the local mock. */
+const safeServiceUrl = (url: string): boolean => {
+  if (devRelease()) return url === buildServiceUrl();
+  return (distBuild() ? HTTPS_URL : DEV_SERVICE_URL).test(url);
+};
 
 /** Every field a stored or imported policy must get right, with the message that names it. */
 const POLICY_CHECKS: PolicyCheck[] = [
@@ -101,7 +126,7 @@ const POLICY_CHECKS: PolicyCheck[] = [
   [(p) => Boolean(p.judge.byok) && isProviderId(p.judge.byok.id), () => `judge.byok.id must be one of ${Object.keys(PROVIDERS).join('|')}`],
   [(p) => p.judge.timeoutMs > 0, () => 'judge.timeoutMs must be positive'],
   [(p) => p.judge.llmTimeoutMs > 0, () => 'judge.llmTimeoutMs must be positive'],
-  [(p) => safeServiceUrl(p.cloud.serviceUrl ?? ''), () => `cloud.serviceUrl must be https${distBuild() ? '' : ' (or http://localhost for development)'}`],
+  [(p) => safeServiceUrl(p.cloud.serviceUrl ?? ''), () => (devRelease() ? `cloud.serviceUrl must be ${buildServiceUrl()}` : `cloud.serviceUrl must be https${distBuild() ? '' : ' (or http://localhost for development)'}`)],
   [(p) => p.cloud.timeoutMs > 0, () => 'cloud.timeoutMs must be positive'],
   [(p) => p.attachWhen === 'always' || p.attachWhen === 'agent-session', () => 'attachWhen must be always|agent-session'],
   [(p) => p.attachScope === 'all-tabs' || p.attachScope === 'target-tabs', (p) => `attachScope must be all-tabs|target-tabs, got ${String(p.attachScope)}`],
@@ -280,7 +305,7 @@ export function normalizePolicy(input: unknown): Policy {
     // A release's Pro address ships with it and no UI edits it: a stored copy is only an old default, so a release
     // that moves the service reaches the new address. A development build keeps the stored one (the mock or the real
     // service, chosen at sign-in in messages.ts).
-    cloud: { ...d.cloud, ...(p.cloud ?? {}), ...(distBuild() ? { serviceUrl: d.cloud.serviceUrl } : {}) },
+    cloud: { ...d.cloud, ...(p.cloud ?? {}), ...(distBuild() ? { serviceUrl: buildServiceUrl() } : {}) },
     sites: { ...Object.fromEntries(BUILTIN_SITES.map((b) => [b.id, { enabled: false }])), ...d.sites, ...(p.sites ?? {}) },
     customSites: Array.isArray(p.customSites) ? p.customSites : d.customSites,
     managed: normalizeManaged(p.managed),

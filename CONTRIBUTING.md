@@ -20,6 +20,14 @@ why the profile must be dedicated: a development build polls `localhost:4173` fo
 on the machine that listens there can change the extension's settings and read its API keys. Release
 builds have no such channel.
 
+A development build's OnlyRead Pro service is chosen when it is built. By default it is the mock in the fixture server
+(a sign-in falls back to production when the mock is not running), and the build keeps whatever service the browser
+already uses. `ONLYREAD_SERVICE_URL=https://pro.onlyread.ai npm run dev` (or `npm run build`) builds for production
+instead, and the browser moves to it when the build starts, signing out of the service it leaves. Put the variable on
+the command rather than exporting it: every build in that shell would use it. The e2e scripts always build for the
+mock, and the suites refuse to start on a build made for another service (`e2e/global-setup.ts`), so run them with
+`npm run e2e`, or `npm run build` first with the variable unset.
+
 ## Adding a site
 
 If you only want a site supported, [open a site request](https://github.com/onlyreadai/onlyread/issues/new?template=site-request.yml)

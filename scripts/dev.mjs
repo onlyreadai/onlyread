@@ -17,9 +17,9 @@ const DIST = path.join(EXT, 'dist');
 /** The built scripts of the extension's own pages: a change to these reloads the pages, not the extension. */
 const PAGE_SCRIPTS = new Set(['options.js', 'popup.js', 'setup.js']);
 
-// Against the real Pro service by default (ONLYREAD_DEV_SERVICE=production, scripts/build.mjs); ONLYREAD_DEV_SERVICE=local
-// keeps the local mock.
-const build = spawn(process.execPath, ['scripts/build.mjs', '--watch'], { stdio: 'inherit', env: { ...process.env, ONLYREAD_DEV_SERVICE: process.env.ONLYREAD_DEV_SERVICE ?? 'production' } });
+// The Pro service as for any development build (ONLYREAD_SERVICE_URL, scripts/build.mjs): unset, the local mock, whose
+// sign-in falls back to the real service when the mock is not running; set, that service, which the browser moves to.
+const build = spawn(process.execPath, ['scripts/build.mjs', '--watch'], { stdio: 'inherit' });
 
 let stamp = { id: String(Date.now()), kind: 'pages' };
 const hashes = new Map();
@@ -65,6 +65,15 @@ server.on('error', (err) => {
 });
 server.listen(PORT, '127.0.0.1', () => console.log(`[dev] reload signal on http://127.0.0.1:${PORT}/dev-reload. Load ${path.resolve(EXT)} unpacked.`));
 
-const stop = () => { build.kill(); server.close(); process.exit(0); };
+let stopping = false;
+const stop = () => { stopping = true; build.kill(); server.close(); process.exit(0); };
+// The watch build died (a refused setting such as a bad ONLYREAD_SERVICE_URL, or a crash): nothing would rebuild
+// any more, so stop too rather than serve a stale build.
+build.on('exit', (code, signal) => {
+  if (stopping) return;
+  console.error(`[dev] The build stopped (${signal ?? `exit code ${code}`}); see its output above. Stopping.`);
+  server.close();
+  process.exit(code || 1);
+});
 process.on('SIGINT', stop);
 process.on('SIGTERM', stop);

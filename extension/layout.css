@@ -1,7 +1,5 @@
 /* The settings page's layout, and the OnlyRead Pro account page's: a sidebar of topics beside one column of sections.
-   One file for both: the Pro service (the cloud repo) keeps a word-for-word copy, checked by its
-   scripts/extension-sync.mjs (`npm run check` fails when the copies differ; `npm run sync:extension` takes this one).
-   Change it here.
+   One file for both: the Pro account page keeps a word-for-word copy of this one. Change it here.
 
    Markup: .page > .shell > nav.side (.top: .wordmark > img.mark + .product, then the topics' links: svg, words, .n)
    and main.content (.content-top: the appearance switch's .seg, then the sections: section > header h2 + p).

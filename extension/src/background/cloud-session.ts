@@ -5,7 +5,7 @@ import type { CloudAccount, CloudStatus, Policy } from '../shared/types';
 import { CloudClient, CloudError, browserPlatform, pkceChallenge, randomToken, signInUrl, uninstallUrl, type BrowserInfo, type Tokens } from './judge/cloud';
 import { releaseAgentBrowser } from './agent-browser';
 import { ownRemove, ownSet } from './owned-storage';
-import { RELEASE_SERVICE_URL, devBuild, devMockServiceUrl } from './policy';
+import { RELEASE_SERVICE_URL, devMockServiceUrl, devServiceLocal } from './policy';
 import { guardedSiteIds } from './sites';
 import { S, system } from './state';
 
@@ -153,13 +153,14 @@ export async function serviceAnswers(url: string, fetchImpl: typeof fetch = fetc
   try { await fetchImpl(url, { method: 'GET', cache: 'no-store', signal: AbortSignal.timeout(1500) }); return true; } catch { return false; }
 }
 
-/** The service a sign-in should go to instead of `p`'s, or undefined to keep it. A development build defaults to the
- *  local mock on the dev sink's host (policy.ts defaultPolicy); when the mock is not running, its sign-in page cannot
- *  be reached ("This site can't be reached"), so the sign-in falls back to the real Pro service. Only a dev build on the mock's own default address falls back: a release, an address set by hand
- *  and a running mock (the e2e suites) keep theirs. */
+/** The service a sign-in should go to instead of `p`'s, or undefined to keep it. A development build made for the local
+ *  mock (no ONLYREAD_SERVICE_URL, policy.ts devServiceLocal) defaults to it on the dev sink's host; when
+ *  the mock is not running, its sign-in page cannot be reached ("This site can't be reached"), so the sign-in falls back
+ *  to the real Pro service. Only such a build on the mock's own default address falls back: a release, a build made for
+ *  another service, an address set by hand and a running mock (the e2e suites) keep theirs. */
 export async function signInFallback(p: Pick<Policy, 'cloud' | 'devSink'>, answers: (url: string) => Promise<boolean> = serviceAnswers): Promise<string | undefined> {
   const mock = devMockServiceUrl(p.devSink);
-  if (!devBuild() || !mock || p.cloud.serviceUrl.replace(/\/$/, '') !== mock || mock === RELEASE_SERVICE_URL) return undefined;
+  if (!devServiceLocal() || !mock || p.cloud.serviceUrl.replace(/\/$/, '') !== mock || mock === RELEASE_SERVICE_URL) return undefined;
   return (await answers(mock)) ? undefined : RELEASE_SERVICE_URL;
 }
 

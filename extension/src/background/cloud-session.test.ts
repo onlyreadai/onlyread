@@ -82,6 +82,15 @@ describe('the Pro session', () => {
     expect(await signInFallback(dev, up)).toBeUndefined(); // the mock is running (the e2e suites)
     expect(await signInFallback({ ...dev, cloud: { ...dev.cloud, serviceUrl: 'http://localhost:9999/cloud' } }, down)).toBeUndefined(); // set by hand
     expect(await signInFallback({ ...dev, devSink: null, cloud: { ...dev.cloud, serviceUrl: RELEASE_SERVICE_URL } }, down)).toBeUndefined();
+    // Only a build for the local mock falls back (no ONLYREAD_SERVICE_URL): one made for another service that finds the
+    // mock's address saved keeps it, until its start moves it (messages.ts applyBuildService).
+    const g = globalThis as { __ONLYREAD_SERVICE_URL__?: string };
+    try {
+      for (const other of ['http://localhost:8080', RELEASE_SERVICE_URL, 'https://foo.example']) {
+        g.__ONLYREAD_SERVICE_URL__ = other;
+        expect(await signInFallback(dev, down)).toBeUndefined();
+      }
+    } finally { delete g.__ONLYREAD_SERVICE_URL__; }
     // Any HTTP answer counts as the mock being there; a refused connection does not.
     expect(await serviceAnswers(`${base}/no-such-page`)).toBe(true);
     expect(await serviceAnswers('http://127.0.0.1:1/cloud')).toBe(false);

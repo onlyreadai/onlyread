@@ -466,8 +466,6 @@ export interface Status {
   attachmentActive: boolean;
   /** A development build: Monitor mode and the developer controls are available. */
   devBuild: boolean;
-  /** Development builds: the Pro services this build can use (the local mock on the dev sink's host, and production). */
-  devServices?: { local?: string; production: string };
   cloud: CloudStatus;
   /** What stops protection being lowered right now: an active AI agent, or a settings PIN not yet entered. */
   lock: SettingsLock;
@@ -630,8 +628,6 @@ export type Message =
   | { type: 'demo:ended'; site: string; stopped?: string; restored: boolean; skipped: boolean }
   /** options → background: let read-tracking writes through (marking things seen, read receipts, view settings). */
   | { type: 'read-tracking:set'; on: boolean }
-  /** options → background, development builds only: use the local mock Pro service or production. */
-  | { type: 'cloud:service-set'; service: 'local' | 'production' }
   | { type: 'exclude:add'; host: string }
   | { type: 'exclude:remove'; host: string }
   | { type: 'sites:list'; host?: string }

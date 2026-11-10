@@ -173,6 +173,23 @@ test('another account\'s page gets no frame', async () => {
   await page.close();
 });
 
+test('the whole settings page, framed by a page without framed mode, stays blank and inert', async () => {
+  const page = await h.ctx.newPage();
+  await page.goto(`${h.base}/`);
+  const frame = async (src: string) => {
+    await page.evaluate((u) => { const f = document.createElement('iframe'); f.src = u; document.body.append(f); }, src);
+    await expect.poll(() => page.frames().find((f) => f.url() === src)).toBeTruthy();
+    const f = page.frames().find((x) => x.url() === src)!;
+    await page.waitForTimeout(1500);
+    return f.evaluate(() => document.body.children.length);
+  };
+  expect(await frame(extPage('options.html'))).toBe(0);
+  expect(await frame(`${extPage('options.html')}#security`)).toBe(0);
+  // This page is on the service's own origin: even there, only framed mode, as the account page frames it, shows.
+  expect(await frame(`${extPage('options.html')}?framed=1#security`)).toBeGreaterThan(0);
+  await page.close();
+});
+
 test('opened on its own, the framed page stays blank', async () => {
   const page = await h.ctx.newPage();
   await page.goto(`${extPage('options.html')}?framed=1#activity`);

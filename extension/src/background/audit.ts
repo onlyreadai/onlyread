@@ -187,7 +187,19 @@ export async function clear(): Promise<void> {
   await flush();
 }
 
-/** The toolbar icon carries no counter: the popup shows the site's status and the page shows refusals. */
+// Replaced by esbuild at build time (scripts/build.mjs); unit tests set them as globals or not at all (typeof keeps
+// them running). Read directly, not through policy.ts, so the store build folds the test to false and drops the badge.
+declare const __ONLYREAD_DIST__: boolean;
+declare const __ONLYREAD_SERVICE_URL__: string;
+
+/** The toolbar icon carries no counter: the popup shows the site's status and the page shows refusals. A test release
+ *  (harness/bundle.py --service-url) carries "DEV" instead, so it is never mistaken for the store copy. */
 export function clearBadge(): void {
+  if (typeof __ONLYREAD_DIST__ !== 'undefined' && __ONLYREAD_DIST__ && typeof __ONLYREAD_SERVICE_URL__ !== 'undefined' && __ONLYREAD_SERVICE_URL__) {
+    void chrome.action.setBadgeText({ text: 'DEV' });
+    void chrome.action.setBadgeBackgroundColor({ color: '#d93025' });
+    void chrome.action.setBadgeTextColor({ color: '#ffffff' });
+    return;
+  }
   void chrome.action.setBadgeText({ text: '' });
 }

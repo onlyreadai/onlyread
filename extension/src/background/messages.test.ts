@@ -29,6 +29,8 @@ const h = vi.hoisted(() => ({
   client: { signedIn: vi.fn(async () => false), signOut: vi.fn(async () => {}) },
   signedOutHooks: [] as (() => void)[],
   lockOpenHooks: [] as (() => void)[],
+  /** The system lines logged (state.ts system). */
+  logged: [] as string[],
 }));
 // Like the real setPolicy, a write becomes the policy last written (policy.ts lastWrittenPolicy) at once, while S.policy
 // takes it only when storage reports it (here: never, unless a test sets it).
@@ -62,7 +64,7 @@ vi.mock('./cloud-session', () => ({
   pendingSignIn: vi.fn(async () => (h.signIn ? { ...h.signIn, verifier: 'v', redirect: 'r', at: 0 } : undefined)),
 }));
 vi.mock('./cloud-sync', () => ({ syncManagedSites: h.sync, applyPendingManaged: h.applyPending, flushAccountEdits: h.edit, accountRefusal: () => undefined, accountBrowsers: (p: Policy) => p.managed?.browsers ?? 1, notifyAccountPages: h.notify, pendingManaged: () => h.pending, whenLockOpens: (fn: () => void) => { h.lockOpenHooks.push(fn); } }));
-vi.mock('./audit', () => ({ list: async () => [], clear: async () => {}, record: async () => {} }));
+vi.mock('./audit', () => ({ list: async () => [], clear: async () => {}, record: async (e: { reason: string }) => { h.logged.push(e.reason); } }));
 vi.mock('./sink', () => ({ send: () => {} }));
 
 // Each test gets fresh modules, so no state (the lock's PIN copy, the storage reports, queued work) carries over.
@@ -1271,34 +1273,97 @@ describe('messages that do not read the lock do not wait for outside-write check
   });
 });
 
-// Development builds choose the Pro service: the local mock on the dev sink's host, or production. A sign-in belongs to
-// the service it was made on, so switching signs the browser out of the one it leaves.
-describe('choosing the Pro service (development builds)', () => {
-  beforeEach(() => { h.client.signedIn.mockReset(); h.client.signOut.mockReset(); });
+// A development build's Pro service is chosen at build time (ONLYREAD_SERVICE_URL, an esbuild define simulated here as
+// a global): when it starts, the build's service wins over the saved one, and the browser signs out of the one it leaves.
+describe('the build\'s Pro service (development builds)', () => {
+  const g = globalThis as { __ONLYREAD_SERVICE_URL__?: string };
+  const SERVICE = 'https://foo.example';
+  const LOCAL = 'http://localhost:8080';
+  const on = (serviceUrl: string) => { S.policy = normalizePolicy({ ...defaultPolicy(), enabled: true, cloud: { ...defaultPolicy().cloud, serviceUrl } }); };
+  let applyBuildService: typeof import('./messages').applyBuildService;
+  beforeEach(async () => {
+    ({ applyBuildService } = await import('./messages'));
+    h.client.signedIn.mockReset(); h.client.signOut.mockReset(); h.logged.length = 0;
+  });
+  afterEach(() => { delete g.__ONLYREAD_SERVICE_URL__; S.agentBrowser = false; });
 
-  it('switches to production and back to the local mock, signing out of the service it leaves', async () => {
-    const { RELEASE_SERVICE_URL, devMockServiceUrl } = await import('./policy');
-    S.policy = normalizePolicy({ ...defaultPolicy(), enabled: true, devSink: 'http://localhost:4173/__audit', cloud: { ...defaultPolicy().cloud, serviceUrl: 'http://localhost:4173/cloud' } });
+  it('moves a signed-in browser to the build\'s service and signs it out of the old one, through a settings PIN', async () => {
+    store.settingsPin = { salt: 's', hash: 'h' }; // the build chooses the address, not anything in the browser
+    on(LOCAL);
+    g.__ONLYREAD_SERVICE_URL__ = SERVICE;
     h.client.signedIn.mockResolvedValue(true);
-    await send({ type: 'cloud:service-set', service: 'production' });
-    expect(h.saved.at(-1)?.cloud.serviceUrl).toBe(RELEASE_SERVICE_URL);
+    await applyBuildService();
+    expect(h.saved.at(-1)?.cloud.serviceUrl).toBe(SERVICE);
     expect(h.client.signOut).toHaveBeenCalledTimes(1);
-    S.policy = h.saved.at(-1)!;
-    await send({ type: 'cloud:service-set', service: 'local' });
-    expect(h.saved.at(-1)?.cloud.serviceUrl).toBe(devMockServiceUrl('http://localhost:4173/__audit'));
-    // The service already in use: nothing saved, nobody signed out.
-    S.policy = h.saved.at(-1)!; const n = h.saved.length;
-    await send({ type: 'cloud:service-set', service: 'local' });
-    expect(h.saved).toHaveLength(n);
-    expect(h.client.signOut).toHaveBeenCalledTimes(2);
+    expect(h.logged).toContain(`cloud:service ${SERVICE} (this build's; signed out of ${LOCAL})`);
   });
 
-  it('is refused while an agent works, and the browser stays signed in', async () => {
-    S.policy = normalizePolicy({ ...defaultPolicy(), enabled: true, devSink: 'http://localhost:4173/__audit', cloud: { ...defaultPolicy().cloud, serviceUrl: 'http://localhost:4173/cloud' } });
-    S.agentSession = true; h.client.signedIn.mockResolvedValue(true);
-    await expect(send({ type: 'cloud:service-set', service: 'production' })).rejects.toThrow();
+  it('signs out of the old service before the new address is written, and writes it on top of what the sign-out settles', async () => {
+    S.policy = normalizePolicy({ ...defaultPolicy(), enabled: true, judge: { ...defaultPolicy().judge, provider: 'cloud' }, cloud: { ...defaultPolicy().cloud, serviceUrl: LOCAL } });
+    g.__ONLYREAD_SERVICE_URL__ = SERVICE;
+    h.client.signedIn.mockResolvedValue(true);
+    let savedAtSignOut = -1;
+    h.client.signOut.mockImplementation(async () => {
+      savedAtSignOut = h.saved.length;
+      h.client.signedIn.mockResolvedValue(false);
+      for (const fn of h.signedOutHooks) fn(); // the tokens gone: the background settles the judge (settleMode)
+    });
+    await applyBuildService();
+    expect(savedAtSignOut).toBe(0); // nothing written while the old tokens were still there
+    // The sign-out's own writes came first, on the old address; the build's address last, keeping them.
+    expect(h.saved.length).toBeGreaterThan(1);
+    expect(h.saved.slice(0, -1).every((p) => p.cloud.serviceUrl === LOCAL)).toBe(true);
+    expect(h.saved.at(-1)).toMatchObject({ cloud: { serviceUrl: SERVICE }, judge: { provider: 'byok' } });
+  });
+
+  it('moves a signed-out browser without signing anything out, to the store\'s own service too', async () => {
+    const { RELEASE_SERVICE_URL } = await import('./policy');
+    on(SERVICE);
+    g.__ONLYREAD_SERVICE_URL__ = RELEASE_SERVICE_URL;
+    await applyBuildService();
+    expect(h.saved.at(-1)?.cloud.serviceUrl).toBe(RELEASE_SERVICE_URL);
+    expect(h.client.signOut).not.toHaveBeenCalled();
+  });
+
+  it('does nothing when the saved service is the build\'s, or for a build made without ONLYREAD_SERVICE_URL', async () => {
+    const { RELEASE_SERVICE_URL } = await import('./policy');
+    on(SERVICE);
+    g.__ONLYREAD_SERVICE_URL__ = SERVICE;
+    h.client.signedIn.mockResolvedValue(true);
+    await applyBuildService();
+    delete g.__ONLYREAD_SERVICE_URL__; // the e2e suites, bundle.py's restored build: the saved service stays
+    for (const other of ['https://elsewhere.example', RELEASE_SERVICE_URL]) { on(other); await applyBuildService(); } // a mock sign-in's fallback too
     expect(h.saved).toEqual([]);
     expect(h.client.signOut).not.toHaveBeenCalled();
+  });
+
+  it('an agent\'s browser signed in stays on its service, and says so', async () => {
+    on(LOCAL);
+    g.__ONLYREAD_SERVICE_URL__ = SERVICE;
+    S.agentBrowser = true; h.client.signedIn.mockResolvedValue(true);
+    await applyBuildService();
+    expect(h.saved).toEqual([]);
+    expect(h.client.signOut).not.toHaveBeenCalled();
+    expect(h.logged).toContain(`cloud:service-kept ${LOCAL} (this build's is ${SERVICE}; an agent's browser stays on its service)`);
+    // Signed out, it moves like any other.
+    h.client.signedIn.mockResolvedValue(false);
+    await applyBuildService();
+    expect(h.saved.at(-1)?.cloud.serviceUrl).toBe(SERVICE);
+  });
+
+  it('a person\'s browser signed in waits while an agent works', async () => {
+    on(LOCAL);
+    g.__ONLYREAD_SERVICE_URL__ = SERVICE;
+    S.agentSession = true; h.client.signedIn.mockResolvedValue(true);
+    await applyBuildService();
+    expect(h.saved).toEqual([]);
+    expect(h.client.signOut).not.toHaveBeenCalled();
+    expect(h.logged.some((l) => l.startsWith('cloud:service-kept') && l.endsWith('an agent is at work)'))).toBe(true);
+  });
+
+  it('has no message to choose the service', async () => {
+    expect(await send({ type: 'cloud:service-set', service: 'production' } as unknown as Message)).toBeUndefined();
+    expect(h.saved).toEqual([]);
   });
 });
 

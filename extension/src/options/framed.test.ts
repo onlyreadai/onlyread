@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { coverFrom, coverQueryFor, coverRule, coverSlack, framedByService } from './framed';
+import { coverFrom, coverQueryFor, coverRule, coverSlack, framedByService, strayFrame } from './framed';
 
 // The framed settings page shows anything only inside the Pro service's own page (options/framed.ts).
 describe('framedByService', () => {
@@ -17,6 +17,21 @@ describe('framedByService', () => {
     expect(framedByService(['https://evil.example', 'https://pro.onlyread.ai'], pro)).toBe(false);
     expect(framedByService([], pro)).toBe(false);
     expect(framedByService(['https://pro.onlyread.ai'], 'not a url')).toBe(false);
+  });
+});
+
+// The whole settings page in another page's frame could be clicked through from there: only framed mode may be framed.
+describe('strayFrame', () => {
+  it('lets the page show on its own, and framed mode go on to its own check', () => {
+    expect(strayFrame([], true, false)).toBe(false);
+    expect(strayFrame(['https://evil.example'], false, true)).toBe(false); // allowFrame then checks the framing page
+    expect(strayFrame(['https://pro.onlyread.ai'], false, true)).toBe(false);
+  });
+  it('blanks the full page in any frame, whoever frames it', () => {
+    expect(strayFrame(['https://evil.example'], false, false)).toBe(true);
+    expect(strayFrame(['https://pro.onlyread.ai'], false, false)).toBe(true);
+    expect(strayFrame([], false, false)).toBe(true); // no ancestor list (a sandboxed frame): not the top window still counts
+    expect(strayFrame(['https://evil.example'], true, false)).toBe(true);
   });
 });
 

@@ -1,9 +1,15 @@
+import { spawnSync } from 'node:child_process';
+import { dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { defaultPolicy, normalizeManaged, normalizePolicy } from './policy';
+import { RELEASE_SERVICE_URL, buildServiceUrl, defaultPolicy, devRelease, devServiceLocal, devServiceSwitch, devServiceUrl, normalizeManaged, normalizePolicy } from './policy';
 
 // The distribution flag is an esbuild define at build time; under vitest we simulate it as a global.
-declare global { var __ONLYREAD_DIST__: boolean | undefined; }
-afterEach(() => { delete (globalThis as { __ONLYREAD_DIST__?: boolean }).__ONLYREAD_DIST__; });
+declare global { var __ONLYREAD_DIST__: boolean | undefined; var __ONLYREAD_SERVICE_URL__: string | undefined; }
+afterEach(() => {
+  delete (globalThis as { __ONLYREAD_DIST__?: boolean }).__ONLYREAD_DIST__;
+  delete (globalThis as { __ONLYREAD_SERVICE_URL__?: string }).__ONLYREAD_SERVICE_URL__;
+});
 
 describe('defaultPolicy distribution override', () => {
   it('is enforce + agent-session with the dev sink in a normal build', () => {
@@ -52,6 +58,111 @@ describe('defaultPolicy distribution override', () => {
     expect(normalizePolicy({ ...defaultPolicy(), devSink: 'http://localhost:4173/__audit' }).devSink).toBe('http://localhost:4173/__audit');
   });
 });
+
+describe('a test release (a release made with ONLYREAD_SERVICE_URL, harness/bundle.py --service-url)', () => {
+  const g = globalThis as { __ONLYREAD_DIST__?: boolean; __ONLYREAD_SERVICE_URL__?: string };
+  const DEV = 'https://foo.example';
+  const stored = (serviceUrl: string) => ({ ...defaultPolicy(), cloud: { ...defaultPolicy().cloud, serviceUrl } });
+
+  it('a store release (no override) is locked to the store address, https only', () => {
+    g.__ONLYREAD_DIST__ = true;
+    g.__ONLYREAD_SERVICE_URL__ = '';
+    expect(devRelease()).toBe(false);
+    expect(buildServiceUrl()).toBe(RELEASE_SERVICE_URL);
+    expect(RELEASE_SERVICE_URL).toBe('https://pro.onlyread.ai');
+    expect(defaultPolicy().cloud.serviceUrl).toBe('https://pro.onlyread.ai');
+    expect(normalizePolicy(stored(DEV)).cloud.serviceUrl).toBe('https://pro.onlyread.ai');
+  });
+  it('a release with the define missing or undefined is a store release', () => {
+    g.__ONLYREAD_DIST__ = true;
+    expect([devRelease(), buildServiceUrl()]).toEqual([false, RELEASE_SERVICE_URL]);
+    g.__ONLYREAD_SERVICE_URL__ = undefined;
+    expect([devRelease(), buildServiceUrl()]).toEqual([false, RELEASE_SERVICE_URL]);
+  });
+  it('is locked to the override: the default, and a saved address replaced', () => {
+    g.__ONLYREAD_DIST__ = true;
+    g.__ONLYREAD_SERVICE_URL__ = DEV;
+    expect(devRelease()).toBe(true);
+    expect(buildServiceUrl()).toBe(DEV);
+    expect(RELEASE_SERVICE_URL).toBe('https://pro.onlyread.ai');
+    const d = defaultPolicy();
+    expect(d.cloud.serviceUrl).toBe(DEV);
+    expect(d.mode).toBe('enforce');
+    expect(d.devSink).toBeNull();
+    expect(normalizePolicy(stored('https://pro.onlyread.ai')).cloud.serviceUrl).toBe(DEV);
+    expect(normalizePolicy(stored('http://localhost:4173/cloud')).cloud.serviceUrl).toBe(DEV);
+  });
+  it('accepts an http://localhost override, and only that address', () => {
+    g.__ONLYREAD_DIST__ = true;
+    g.__ONLYREAD_SERVICE_URL__ = 'http://localhost:8080';
+    expect(normalizePolicy(stored('https://pro.onlyread.ai')).cloud.serviceUrl).toBe('http://localhost:8080');
+    // Another localhost address is a stored copy like any other: replaced by the build's.
+    expect(normalizePolicy(stored('http://localhost:4173/cloud')).cloud.serviceUrl).toBe('http://localhost:8080');
+  });
+});
+
+describe('a development build\'s Pro service (ONLYREAD_SERVICE_URL)', () => {
+  const g = globalThis as { __ONLYREAD_DIST__?: boolean; __ONLYREAD_SERVICE_URL__?: string };
+  const SINK = 'http://localhost:4173/__audit';
+  const MOCK = 'http://localhost:4173/cloud';
+  const saved = (serviceUrl: string) => ({ cloud: { serviceUrl, timeoutMs: 8000 } });
+
+  it('without it: starts on the mock, falls back from it, never moves a saved service, and is no test release', () => {
+    expect([devServiceUrl(SINK), devServiceLocal(), defaultPolicy().cloud.serviceUrl, devRelease()]).toEqual([MOCK, true, MOCK, false]);
+    for (const url of ['https://foo.example', RELEASE_SERVICE_URL, 'http://localhost:8080']) expect(devServiceSwitch(saved(url))).toBeUndefined();
+    g.__ONLYREAD_SERVICE_URL__ = '';
+    expect([devServiceUrl(SINK), devServiceSwitch(saved('https://foo.example'))]).toEqual([MOCK, undefined]);
+  });
+  it.each(['https://foo.example', 'http://localhost:8080', 'https://pro.onlyread.ai'])('%s: starts there, moves any other saved service there', (url) => {
+    g.__ONLYREAD_SERVICE_URL__ = url;
+    expect([devServiceUrl(SINK), devServiceLocal(), defaultPolicy().cloud.serviceUrl, devRelease()]).toEqual([url, false, url, false]);
+    expect(devServiceSwitch(saved(MOCK))).toBe(url);
+    expect(devServiceSwitch(saved(url))).toBeUndefined();
+    expect(devServiceSwitch(saved(`${url}/`))).toBeUndefined();
+    // A development build keeps a saved service it is given (a test's): only the start moves it (messages.ts).
+    expect(normalizePolicy({ ...defaultPolicy(), cloud: { ...defaultPolicy().cloud, serviceUrl: MOCK } }).cloud.serviceUrl).toBe(MOCK);
+  });
+  it('a release uses it as its own lock, never as a development build\'s', () => {
+    g.__ONLYREAD_DIST__ = true;
+    g.__ONLYREAD_SERVICE_URL__ = 'https://foo.example';
+    expect([devServiceUrl(SINK), devServiceLocal(), devServiceSwitch(saved(MOCK))]).toEqual([undefined, false, undefined]);
+  });
+});
+
+describe('scripts/build.mjs checks ONLYREAD_SERVICE_URL', () => {
+  // --validate-only stops after the checks: a loosened check can never start a real build into extension/dist.
+  const script = fileURLToPath(new URL('../../../scripts/build.mjs', import.meta.url));
+  const root = dirname(dirname(script));
+  const validate = (env: Record<string, string>) =>
+    spawnSync(process.execPath, [script, '--validate-only'], { cwd: root, env: { ...process.env, ...env }, encoding: 'utf8' });
+  const bad = [
+    'http://evil.example', 'http://127.0.0.1:3001', 'https://foo.example/', 'https://foo.example/path', 'https://Foo.example',
+    'https://foo.example.', 'https://user@foo.example', 'https://foo.example:443', 'ftp://foo.example', 'https://[::1]',
+    'https://[::1]:8443', 'https://[::1', 'foo.example', 'production',
+  ];
+  it.each(bad.flatMap((url) => [[url, ''], [url, '1']]))('refuses %j (ONLYREAD_DIST=%j)', (url, dist) => {
+    const r = validate({ ONLYREAD_SERVICE_URL: url, ONLYREAD_DIST: dist });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('build refused: ONLYREAD_SERVICE_URL');
+  });
+  it.each(['', 'https://foo.example', 'https://foo.example:8443', 'http://localhost:8080'].flatMap((url) => [[url, ''], [url, '1']]))('accepts %j (ONLYREAD_DIST=%j)', (url, dist) => {
+    expect(validate({ ONLYREAD_SERVICE_URL: url, ONLYREAD_DIST: dist }).status).toBe(0);
+  });
+  it('refuses the fixture\'s port for a development build: the mock is the build without the variable', () => {
+    const r = validate({ ONLYREAD_SERVICE_URL: 'http://localhost:4173', ONLYREAD_DIST: '' });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('leave ONLYREAD_SERVICE_URL unset for the mock');
+  });
+  it('takes the store\'s own service for a development build, never for a test release', () => {
+    expect(validate({ ONLYREAD_SERVICE_URL: RELEASE_SERVICE_URL, ONLYREAD_DIST: '' }).status).toBe(0);
+    for (const url of [RELEASE_SERVICE_URL, `${RELEASE_SERVICE_URL}:8443`]) {
+      const r = validate({ ONLYREAD_SERVICE_URL: url, ONLYREAD_DIST: '1' });
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain('the store release\'s own service');
+    }
+  });
+});
+
 
 describe('normalizePolicy fills new fields from defaults', () => {
   it('supplies enabled, attachWhen, onRefusedMutation, allowReadTracking when a stored policy omits them', () => {

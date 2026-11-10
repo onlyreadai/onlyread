@@ -36,18 +36,18 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
     "coverage": "vitest run --coverage",
-    "test:py": "python3 harness/lib/test_fingerprint.py",
+    "test:py": "python3 harness/lib/test_fingerprint.py && python3 harness/test_bundle.py",
     "lint": "biome lint && python3 -m ruff check .",
     "check": "npm run typecheck && npm run lint && npm run coverage && npm run test:py && npm run build && npm run scrub",
     "fixture": "node fixtures/testapp/server.ts",
-    "e2e": "npm run build && playwright test",
+    "e2e": "ONLYREAD_SERVICE_URL= npm run build && playwright test",
     "scrub": "python3 harness/scrub_check.py",
     "bundle": "python3 harness/bundle.py",
     "release": "npm run check && python3 harness/bundle.py --strict",
     "hooks": "git config core.hooksPath scripts/hooks",
-    "e2e:live": "npm run build && ONLYREAD_LIVE=1 playwright test e2e/live-judge.spec.ts --retries=2",
-    "e2e:replay": "npm run build && playwright test e2e/replay.spec.ts",
-    "e2e:replay:watch": "npm run build && HEADED=1 playwright test e2e/replay.spec.ts"
+    "e2e:live": "ONLYREAD_SERVICE_URL= npm run build && ONLYREAD_LIVE=1 playwright test e2e/live-judge.spec.ts --retries=2",
+    "e2e:replay": "ONLYREAD_SERVICE_URL= npm run build && playwright test e2e/replay.spec.ts",
+    "e2e:replay:watch": "ONLYREAD_SERVICE_URL= npm run build && HEADED=1 playwright test e2e/replay.spec.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.3.0"

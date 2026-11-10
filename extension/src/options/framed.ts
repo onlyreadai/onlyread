@@ -131,6 +131,14 @@ const COVER_WAIT_MS = 400;
 /** The tallest the page lets the frame be (content/account-frames.ts). */
 const MAX_FRAME_HEIGHT = 20_000;
 
+/** Whether the settings page is in a frame without asking for framed mode (?framed=1). The whole page in another page's
+ *  frame could be clicked through from there (turn protection off, switch sites off): it shows only on its own, or
+ *  framed as one section once the framing page is the service's (allowFrame). A development build lets any https page
+ *  frame it (manifest web_accessible_resources); a release only its service's pages. */
+export function strayFrame(ancestors: ArrayLike<string>, topLevel: boolean, framedMode: boolean): boolean {
+  return !framedMode && (!topLevel || ancestors.length > 0);
+}
+
 /** Whether `ancestors` is exactly the Pro service's page: one ancestor, the service's origin. */
 export function framedByService(ancestors: ArrayLike<string>, serviceUrl: string): boolean {
   let origin: string;
