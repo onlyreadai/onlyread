@@ -136,7 +136,13 @@ function fromAddress(): void {
 }
 
 export function mountReport(): void {
-  $('report-send').addEventListener('click', () => void sendReport());
+  const sendButton = $<HTMLButtonElement>('report-send');
+  sendButton.addEventListener('click', () => void sendReport());
+  $('report-email').addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter' || event.isComposing) return;
+    event.preventDefault();
+    sendButton.click();
+  });
   $('report-done').addEventListener('click', closeAnimated);
   dialog().addEventListener('close', () => { clearTimeout(closeTimer); });
   $('report-details').addEventListener('toggle', preview);
