@@ -45,7 +45,7 @@ describe('setCount', () => {
     reduced = true;
     const target = el();
     setCount(target, 1234);
-    expect(target.textContent).toBe('1,234');
+    expect(target.textContent).toBe((1234).toLocaleString());
     expect(frames).toHaveLength(0);
   });
 
@@ -61,10 +61,10 @@ describe('setCount', () => {
     setCount(target, 1234);
     expect(target.textContent).toBe('');
     runFrames(1450); // halfway: eased to 1,080, still animating
-    expect(target.textContent).toBe('1,080');
+    expect(target.textContent).toBe((1080).toLocaleString());
     expect(frames).toHaveLength(1);
     runFrames(1900); // 900 ms after the start: done, no frame left
-    expect(target.textContent).toBe('1,234');
+    expect(target.textContent).toBe((1234).toLocaleString());
     expect(frames).toHaveLength(0);
   });
 
@@ -72,11 +72,11 @@ describe('setCount', () => {
     const target = el();
     setCount(target, 1234);
     runFrames(1450);
-    expect(target.textContent).toBe('1,080');
+    expect(target.textContent).toBe((1080).toLocaleString());
     setCount(target, 1234);
     expect(frames).toHaveLength(1); // no fresh frame: the first animation just carries on
     runFrames(1900);
-    expect(target.textContent).toBe('1,234');
+    expect(target.textContent).toBe((1234).toLocaleString());
     expect(frames).toHaveLength(0);
   });
 
