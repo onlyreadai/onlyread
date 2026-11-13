@@ -165,7 +165,8 @@ function addNote(text: string, kind: '' | 'ok' | 'err' | 'warn', where: Section)
 
 const emptyLine = (text: string, cls = '') => textEl('div', `empty ${cls}`.trim(), text);
 
-/** The search box: rows whose name or domains hold the text stay; a group with none left says so. */
+/** The search box: rows whose name or domains hold the text stay; a group with none left says so. The popular-site
+ *  chips follow the same rule, and their block goes away when no chip is left. */
 function applySearch(): void {
   const q = $<HTMLInputElement>('site-search').value.trim().toLowerCase();
   for (const group of [$('account-sites'), $('sites')]) {
@@ -174,6 +175,9 @@ function applySearch(): void {
     group.querySelector('.nomatch')?.remove();
     if (q && rows.length && rows.every((r) => r.hidden)) group.append(emptyLine('No site here matches your search.', 'nomatch'));
   }
+  const chips = [...$('popular-chips').querySelectorAll<HTMLElement>('.chip')];
+  for (const chip of chips) chip.hidden = Boolean(q) && !chip.dataset.search?.includes(q);
+  $('popular').hidden = chips.length === 0 || chips.every((chip) => chip.hidden);
 }
 $('site-search').addEventListener('input', applySearch);
 
@@ -228,6 +232,7 @@ function renderPopular(sites: SiteView[]): void {
     const chip = document.createElement('button');
     chip.type = 'button';
     chip.className = 'chip';
+    chip.dataset.search = [s.name, ...s.domains].join(' ').toLowerCase();
     chip.title = siteSummary(s.description);
     chip.setAttribute('aria-label', `Add ${s.name}`);
     chip.append(iconImg(s), document.createTextNode(s.name), textEl('span', 'plus', '+'));
