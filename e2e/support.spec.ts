@@ -5,7 +5,7 @@ import { test, expect } from '@playwright/test';
 import { Harness } from './helpers';
 
 const h = new Harness(4267);
-const reports = async () => ((await (await fetch(`${h.base}/cloud/__mock`)).json()) as { reports: { account?: string; body: { note: string; extension: { mode: string }; requests: { method: string; url: string }[] } }[] }).reports;
+const reports = async () => ((await (await fetch(`${h.base}/cloud/__mock`)).json()) as { reports: { account?: string; body: { note: string; email?: string; extension: { mode: string }; requests: { method: string; url: string }[] } }[] }).reports;
 test.beforeAll(async () => {
   await h.start({ mode: 'enforce', reviewBand: 'block' });
   await h.setPolicy({ cloud: { serviceUrl: `${h.base}/cloud`, timeoutMs: 8000 } });
@@ -13,7 +13,7 @@ test.beforeAll(async () => {
 });
 test.afterAll(async () => { await h.stop(); });
 
-test('an Activity row\'s report button sends that refusal and the rest of its burst with a note, as the dialog showed them', async () => {
+test('Enter in the report email field sends the selected refusals and note shown in the dialog', async () => {
   expect(await h.pageFetch('PUT', '/api/items/2', '{"name":"x"}')).toMatch(/^error:/);
   expect(await h.pageFetch('DELETE', '/api/items/1?token=s3cret')).toMatch(/^error:/);
   const o = await h.ctx.newPage();
@@ -31,13 +31,16 @@ test('an Activity row\'s report button sends that refusal and the rest of its bu
   await o.locator('#report-note').fill('deleting is a read here, honestly');
   await o.locator('#report-details summary').click();
   await expect(o.locator('#report-preview')).toContainText('deleting is a read here');
-  await o.locator('#report-send').click();
+  const email = o.locator('#report-email');
+  await email.fill('reporter@example.com');
+  await email.press('Enter');
   // Sent: the check with the report's number over the form, then the dialog closes by itself.
   await expect(o.locator('#report-done')).toBeVisible({ timeout: 15_000 });
   await expect(o.locator('#report-id')).toHaveText(/^[0-9A-F]{8}$/);
   const [r] = await reports();
   expect(r!.account).toBeUndefined();
   expect(r!.body.note).toBe('deleting is a read here, honestly');
+  expect(r!.body.email).toBe('reporter@example.com');
   expect(r!.body.extension.mode).toBe('enforce');
   expect(r!.body.requests.map((q) => q.method)).toEqual(['DELETE', 'PUT']);
   expect(r!.body.requests[0]!.url).toContain('/api/items/1');
@@ -52,5 +55,10 @@ test('#report opens the dialog on the newest refusal, over the Activity list', a
   await expect(o.locator('#report-dialog')).toBeVisible({ timeout: 15_000 });
   await expect(o.locator('#report-send')).toBeEnabled();
   expect(new URL(o.url()).hash).toBe('#activity');
+  const checked = o.locator('#report-what .pick input:checked');
+  while (await checked.count()) await checked.first().uncheck();
+  await o.locator('#report-email').press('Enter');
+  await expect(o.locator('#report-dialog')).toBeVisible();
+  await expect(o.locator('#report-done')).toBeHidden();
   await o.close();
 });
