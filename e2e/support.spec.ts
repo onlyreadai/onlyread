@@ -140,3 +140,26 @@ test('#report hides bulk selection with zero or one refusal', async () => {
   expect(await reports()).toHaveLength(0);
   await o.close();
 });
+
+test('the note counter starts at the limit, follows edits and resets when the dialog reopens', async () => {
+  expect(await h.pageFetch('PUT', '/api/items/2', '{"name":"x"}')).toMatch(/^error:/);
+  const o = await h.ctx.newPage();
+  const url = `chrome-extension://${new URL(h.sw.url()).host}/options.html#report`;
+  const dialog = o.locator('#report-dialog');
+  const note = dialog.locator('#report-note');
+  const counter = dialog.locator('#report-note-count');
+  await o.goto(url);
+  await expect(dialog).toBeVisible({ timeout: 15_000 });
+  await expect(note).toHaveAttribute('aria-describedby', 'report-note-count');
+  await expect(counter).toHaveText('2,000 characters remaining');
+  await note.fill('hello');
+  await expect(counter).toHaveText('1,995 characters remaining');
+  await note.fill('a'.repeat(2000));
+  await expect(counter).toHaveText('0 characters remaining');
+  await dialog.getByRole('button', { name: 'Cancel' }).click();
+  await expect(dialog).toBeHidden();
+  await o.goto(url);
+  await expect(dialog).toBeVisible({ timeout: 15_000 });
+  await expect(counter).toHaveText('2,000 characters remaining');
+  await o.close();
+});

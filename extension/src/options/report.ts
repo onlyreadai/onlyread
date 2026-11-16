@@ -25,6 +25,14 @@ function el(tag: string, text: string): HTMLElement {
 
 const chosen = (): SupportItem[] => (list?.items ?? []).filter((i) => picked.has(i.key));
 
+/** The note's maxlength; the counter counts the same units the browser does. */
+const NOTE_MAX = 2000;
+/** "1,995 characters remaining", refreshed when the dialog opens and on every edit. */
+function count(): void {
+  const left = NOTE_MAX - $<HTMLTextAreaElement>('report-note').value.length;
+  $('report-note-count').textContent = `${left.toLocaleString('en-US')} character${left === 1 ? '' : 's'} remaining`;
+}
+
 /** The report as Send would send it now. */
 function report(): SupportReport | undefined {
   if (!list) return undefined;
@@ -83,6 +91,7 @@ export async function openReport(key?: string): Promise<void> {
 
   $('report-cancel').textContent = 'Cancel';
   $<HTMLTextAreaElement>('report-note').value = '';
+  count();
   const email = $<HTMLInputElement>('report-email');
   if (!email.value && list?.email) email.value = list.email;
   const what = $('report-what');
@@ -161,7 +170,7 @@ export function mountReport(): void {
   $('report-done').addEventListener('click', closeAnimated);
   dialog().addEventListener('close', () => { clearTimeout(closeTimer); });
   $('report-details').addEventListener('toggle', preview);
-  $('report-note').addEventListener('input', preview);
+  $('report-note').addEventListener('input', () => { count(); preview(); });
   $('report-email').addEventListener('input', preview);
   addEventListener('hashchange', fromAddress);
   fromAddress();
