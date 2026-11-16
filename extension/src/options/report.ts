@@ -15,6 +15,7 @@ let list: SupportList | undefined;
 /** The refusals ticked to send, by key. */
 const picked = new Set<string>();
 let sent = false;
+let sending = false;
 
 function el(tag: string, text: string): HTMLElement {
   const e = document.createElement(tag);
@@ -34,8 +35,17 @@ function report(): SupportReport | undefined {
 
 /** "What is sent", and Send only with something ticked. */
 function preview(): void {
-  if (!sent) $<HTMLButtonElement>('report-send').disabled = chosen().length === 0;
+  if (!sent) $<HTMLButtonElement>('report-send').disabled = sending || chosen().length === 0;
   if ($<HTMLDetailsElement>('report-details').open) $('report-preview').textContent = JSON.stringify(report(), null, 2);
+}
+
+function pickAll(checked: boolean): void {
+  picked.clear();
+  if (checked) {
+    for (const i of list?.items ?? []) picked.add(i.key);
+  }
+  for (const box of $('report-what').querySelectorAll<HTMLInputElement>('.pick input')) box.checked = checked;
+  preview();
 }
 
 /** One refusal of the burst, with its box. */
@@ -77,6 +87,7 @@ export async function openReport(key?: string): Promise<void> {
   if (!email.value && list?.email) email.value = list.email;
   const what = $('report-what');
   const items = list?.items ?? [];
+  $('report-selection').hidden = items.length <= 1;
   if (items.length) {
     const now = Date.now();
     what.replaceChildren(...items.map((i) => row(i, now)));
@@ -89,13 +100,15 @@ export async function openReport(key?: string): Promise<void> {
 }
 
 async function sendReport(): Promise<void> {
-  if (!chosen().length || sent) return;
+  if (!chosen().length || sent || sending) return;
   const btn = $<HTMLButtonElement>('report-send');
+  sending = true;
   btn.disabled = true;
   result('Sending…');
   const r = await send<{ ok: true; id: string } | { ok: false; error: string }>({
     type: 'support:send', keys: chosen().map((i) => i.key), note: $<HTMLTextAreaElement>('report-note').value, email: $<HTMLInputElement>('report-email').value,
   }).catch((err: unknown) => ({ ok: false as const, error: err instanceof Error ? err.message : String(err) }));
+  sending = false;
   if (r.ok) {
     sent = true;
     result(`Sent, thank you. Your report number is ${r.id}. Mention it if you write to us.`, 'ok');
@@ -109,7 +122,7 @@ async function sendReport(): Promise<void> {
     closeTimer = setTimeout(closeAnimated, DONE_MS);
   } else {
     result(r.error, 'err');
-    btn.disabled = false;
+    preview();
   }
 }
 
@@ -138,6 +151,8 @@ function fromAddress(): void {
 export function mountReport(): void {
   const sendButton = $<HTMLButtonElement>('report-send');
   sendButton.addEventListener('click', () => void sendReport());
+  $('report-select-all').addEventListener('click', () => pickAll(true));
+  $('report-clear-selection').addEventListener('click', () => pickAll(false));
   $('report-email').addEventListener('keydown', (event) => {
     if (event.key !== 'Enter' || event.isComposing) return;
     event.preventDefault();
