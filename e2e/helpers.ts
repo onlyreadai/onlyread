@@ -1,6 +1,7 @@
 import { chromium, type BrowserContext, type Page, type Worker } from '@playwright/test';
 import { spawn, type ChildProcess } from 'node:child_process';
 import crypto from 'node:crypto';
+import { once } from 'node:events';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -77,7 +78,11 @@ export class Harness {
 
   async stop(): Promise<void> {
     await this.ctx?.close();
-    this.server?.kill();
+    const server = this.server;
+    if (!server?.pid || server.exitCode !== null || server.signalCode !== null) return;
+    const exited = once(server, 'exit');
+    server.kill();
+    await exited;
   }
 
   /** Whether the pages show as with an AI judge set (messages.ts assumeJudge); the judge itself stays as it is. */
