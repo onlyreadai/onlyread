@@ -62,6 +62,19 @@ class ServiceCheckTests(unittest.TestCase):
             with self.subTest(bg=bg, name=man["name"]), self.assertRaises(SystemExit):
                 self.check(man, bg, None, STORE_INFO)
 
+    def test_a_release_refuses_a_wrong_name_or_title_alone(self):
+        # Either one wrong is enough: a store release whose toolbar title still reads "OnlyRead (dev)", or a test
+        # release that kept only the store name, is refused.
+        for service_url, info, wrong in [(None, STORE_INFO, bundle.DEV_NAME), (DEV, DEV_INFO, bundle.STORE_NAME)]:
+            for field in ("name", "title"):
+                man = bundle.release_manifest(MANIFEST, service_url)
+                if field == "name": man["name"] = wrong
+                else: man["action"]["default_title"] = wrong
+                bg = f'x="https://pro.onlyread.ai",y="{service_url}"'
+                with self.subTest(service_url=service_url, field=field):
+                    with self.assertRaises(SystemExit) as e: self.check(man, bg, service_url, info)
+                    self.assertIn("manifest name", str(e.exception.code))
+
     def test_a_release_refuses_frame_origins_other_than_its_own(self):
         for service_url, info in [(None, STORE_INFO), (DEV, DEV_INFO)]:
             for matches in [MANIFEST["web_accessible_resources"][0]["matches"], ["https://*/*"], ["https://pro.onlyread.ai/*", f"{DEV}/*"], []]:
