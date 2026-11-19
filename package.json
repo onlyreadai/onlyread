@@ -54,8 +54,8 @@
     "@anthropic-ai/sdk": "^1.6.0"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.6.6",
-    "@playwright/test": "^1.65.0",
+    "@biomejs/biome": "2.6.8",
+    "@playwright/test": "^1.65.1",
     "@types/chrome": "^0.3.7",
     "@types/express": "^5.0.6",
     "@types/node": "^26.6.6",
@@ -67,6 +67,6 @@
     "tsx": "4.23.15",
     "typescript": "^7.0.2",
     "vitest": "^5.0.5",
-    "ws": "^8.22.2"
+    "ws": "^8.23.0"
   }
 }
