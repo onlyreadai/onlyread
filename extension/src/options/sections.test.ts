@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { setCount } from './sections';
+import { setActivityCount, setCount } from './sections';
 
 // The settings count animation, driven directly: a fake clock and a queue of animation frames stand in for the
 // browser, so no test sleeps. Each test gets a fresh element (the per-element state lives in a WeakMap) and the
@@ -103,5 +103,29 @@ describe('setCount', () => {
     setCount(target, 0);
     expect(target.textContent).toBe('0');
     expect(frames).toHaveLength(0);
+  });
+});
+
+describe('setActivityCount', () => {
+  const el = (): HTMLElement => document.createElement('span');
+
+  it('hides the badge when the count is zero', () => {
+    const target = el();
+    setActivityCount(target, 0);
+    expect(target.textContent).toBe('');
+  });
+
+  it('shows a positive refused-write count', () => {
+    const target = el();
+    setActivityCount(target, 5);
+    expect(target.textContent).toBe('5');
+  });
+
+  it('clears the badge when the count changes from positive to zero', () => {
+    const target = el();
+    setActivityCount(target, 5);
+    expect(target.textContent).toBe('5');
+    setActivityCount(target, 0);
+    expect(target.textContent).toBe('');
   });
 });

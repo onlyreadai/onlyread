@@ -53,3 +53,8 @@ export function setCount(el: HTMLElement, value: number): void {
   };
   requestAnimationFrame(step);
 }
+
+/** Show the Activity badge only when there are refused writes today. */
+export function setActivityCount(el: HTMLElement, value: number): void {
+  el.textContent = value > 0 ? String(value) : '';
+}
