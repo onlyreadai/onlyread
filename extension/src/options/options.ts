@@ -8,7 +8,7 @@ import { applyTheme, initTheme, normalizeTheme, setTheme, type Theme } from '../
 import { anthropicLine, mountByokForm } from '../shared/byok-form';
 import { exclusionLine, type OverviewButton, overviewAction, overviewFacts, overviewHeading, setupLine, siteSummary } from '../shared/status-text';
 import { relativeTime } from '../shared/refusals';
-import { installSidebar, reducedMotion, scrollToSection, setCount } from './sections';
+import { installSidebar, reducedMotion, scrollToSection, setActivityCount, setCount } from './sections';
 import { takeSignInResult } from '../shared/sign-in-result';
 import { MEGAPHONE, mountReport, openReport } from './report';
 import { allowFrame, enterFramed, framedSection, framedTheme, strayFrame } from './framed';
@@ -309,6 +309,7 @@ function renderCounts(st: Status, sites: SiteView[], activity: ActivitySummary |
   $('t-account').textContent = st.cloud?.signedIn && fromAccount ? `${fromAccount} from your account` : '';
   if (!activity) return;
   setCount($('t-refused'), activity.today.refused);
+  setActivityCount($('side-activity'), activity.today.refused);
   // Out of every request OnlyRead checked on guarded sites today, reads included.
   $('t-seen').textContent = `of ${activity.today.seen.toLocaleString()} requests checked`;
 }
