@@ -85,6 +85,7 @@ export async function openReport(key?: string): Promise<void> {
   result('');
   clearTimeout(closeTimer);
   clearTimeout(animationTimer);
+  automaticallyClosing = false;
   clearTimeout(feedbackTimer);
   copyGeneration++;
   copying = false;
@@ -149,11 +150,21 @@ let feedbackTimer: ReturnType<typeof setTimeout> | undefined;
 let animationTimer: ReturnType<typeof setTimeout> | undefined;
 let copyGeneration = 0;
 let copying = false;
+let automaticallyClosing = false;
 
 function scheduleClose(): void {
   clearTimeout(closeTimer);
   if (!sent || copying || document.activeElement === $('report-copy') || $('report-copy-feedback').dataset.failed === 'true') return;
-  closeTimer = setTimeout(closeAnimated, DONE_MS);
+  closeTimer = setTimeout(() => closeAnimated(true), DONE_MS);
+}
+
+/** Copying and focus can interrupt automatic dismissal, but not an explicit Close. */
+function holdDismissal(): void {
+  clearTimeout(closeTimer);
+  if (!automaticallyClosing) return;
+  clearTimeout(animationTimer);
+  automaticallyClosing = false;
+  dialog().classList.remove('closing');
 }
 
 async function copyReport(): Promise<void> {
@@ -162,7 +173,7 @@ async function copyReport(): Promise<void> {
   const id = $('report-id').textContent ?? '';
   copying = true;
   clearTimeout(feedbackTimer);
-  clearTimeout(closeTimer);
+  holdDismissal();
   try {
     await navigator.clipboard.writeText(id);
     if (generation !== copyGeneration) return;
@@ -183,10 +194,16 @@ async function copyReport(): Promise<void> {
 }
 
 /** Closes the dialog with its closing animation (at once when motion is reduced). */
-function closeAnimated(): void {
+function closeAnimated(automatic = false): void {
   clearTimeout(closeTimer);
   const d = dialog();
-  if (!d.open || d.classList.contains('closing')) return;
+  if (!d.open) return;
+  if (d.classList.contains('closing')) {
+    // An explicit Close takes precedence even if an automatic animation already started.
+    if (!automatic) automaticallyClosing = false;
+    return;
+  }
+  automaticallyClosing = automatic;
   if (matchMedia('(prefers-reduced-motion: reduce)').matches) { d.close(); return; }
   d.classList.add('closing');
   animationTimer = setTimeout(() => { d.close(); d.classList.remove('closing'); }, 280);
@@ -215,14 +232,14 @@ export function mountReport(): void {
     event.stopPropagation();
     void copyReport();
   });
-  $('report-copy').addEventListener('focus', () => { clearTimeout(closeTimer); });
+  $('report-copy').addEventListener('focus', holdDismissal);
   $('report-copy').addEventListener('blur', scheduleClose);
   $('report-done').addEventListener('click', (event) => {
     // Keep the number selectable for manual copying.
     if ((event.target as HTMLElement).closest('#report-id, #report-copy-feedback')) return;
     closeAnimated();
   });
-  dialog().addEventListener('close', () => { clearTimeout(closeTimer); clearTimeout(feedbackTimer); copyGeneration++; copying = false; });
+  dialog().addEventListener('close', () => { clearTimeout(closeTimer); clearTimeout(feedbackTimer); automaticallyClosing = false; copyGeneration++; copying = false; });
   $('report-details').addEventListener('toggle', preview);
   $('report-note').addEventListener('input', () => { count(); preview(); });
   $('report-email').addEventListener('input', preview);

@@ -243,3 +243,45 @@ for (const reject of [false, true]) {
     await o.close();
   });
 }
+
+for (const interaction of ['focus', 'copy', 'reject'] as const) {
+  test(`copy interaction during automatic closing: ${interaction}`, async () => {
+    expect(await h.pageFetch('PUT', '/api/items/2', '{"name":"x"}')).toMatch(/^error:/);
+    const o = await h.ctx.newPage();
+    await o.goto(`chrome-extension://${new URL(h.sw.url()).host}/options.html#report`);
+    await o.emulateMedia({ reducedMotion: 'no-preference' });
+    await o.clock.install();
+    await o.clock.pauseAt(new Date());
+    await o.evaluate((reject) => {
+      Object.defineProperty(navigator, 'clipboard', { configurable: true, value: {
+        writeText: async () => { if (reject) throw new Error('Permission denied'); },
+      } });
+    }, interaction === 'reject');
+    await o.getByRole('button', { name: 'Send to Support', exact: true }).click();
+    await expect(o.locator('#report-done')).toBeVisible({ timeout: 15_000 });
+    const dialog = o.locator('#report-dialog');
+    await o.clock.runFor(3200);
+    await expect(dialog).toHaveClass(/closing/);
+    // Act inside the 280 ms window, without Playwright waiting for the animation to finish.
+    await o.evaluate((interaction) => {
+      const copy = document.getElementById('report-copy') as HTMLButtonElement;
+      if (interaction === 'focus') copy.focus();
+      else copy.click();
+    }, interaction);
+    await o.clock.runFor(280);
+    await expect(dialog).toBeVisible();
+    await expect(dialog).not.toHaveClass(/closing/);
+    if (interaction !== 'focus') {
+      await expect(o.locator('#report-copy-feedback')).toContainText(interaction === 'reject' ? 'Could not copy.' : 'Copied');
+    }
+    // Focus must not undo the person's explicit Close.
+    await o.evaluate(() => {
+      (document.getElementById('report-done-close') as HTMLButtonElement).click();
+      document.getElementById('report-copy')!.focus();
+    });
+    await o.clock.runFor(280);
+    await expect(dialog).toBeHidden();
+    expect(await reports()).toHaveLength(1);
+    await o.close();
+  });
+}
