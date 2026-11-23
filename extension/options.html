@@ -218,6 +218,7 @@
   #report-dialog .report-done[hidden] { display: none; }
   #report-dialog .report-done b { font: 800 18px/1.25 var(--display); letter-spacing: -0.02em; animation: done-rise .4s ease-out .45s both; }
   #report-dialog .report-done span { font-size: 13px; color: var(--muted); animation: done-rise .4s ease-out .6s both; }
+  #report-id { user-select: text; }
   #report-dialog .report-done code { font: 600 13px var(--mono); color: var(--fg); }
   .done-check { width: 60px; height: 60px; margin-bottom: 6px; fill: none; stroke: var(--accent); stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
   .done-check circle { stroke-dasharray: 145; stroke-dashoffset: 145; animation: done-draw .55s cubic-bezier(.65, 0, .45, 1) .05s forwards; }
@@ -795,6 +796,9 @@
         <svg class="done-check" viewBox="0 0 52 52" aria-hidden="true"><circle cx="26" cy="26" r="23"/><path d="m15 27 7.5 7.5L38 19"/></svg>
         <b>Sent, thank you</b>
         <span>Report number <code id="report-id"></code>. Mention it if you write to us.</span>
+        <button type="button" class="btn" id="report-copy" aria-describedby="report-copy-feedback">Copy report number</button>
+        <span id="report-copy-feedback" role="status" aria-live="polite"></span>
+        <button type="button" class="btn" id="report-done-close">Close</button>
       </div>
     </dialog>
 

@@ -163,3 +163,83 @@ test('the note counter starts at the limit, follows edits and resets when the di
   await expect(counter).toHaveText('2,000 characters remaining');
   await o.close();
 });
+
+for (const reject of [false, true]) {
+  test(`copy report number with ${reject ? 'rejected' : 'successful'} clipboard access`, async () => {
+    expect(await h.pageFetch('PUT', '/api/items/2', '{"name":"x"}')).toMatch(/^error:/);
+    const o = await h.ctx.newPage();
+    await o.goto(`chrome-extension://${new URL(h.sw.url()).host}/options.html#report`);
+    await o.evaluate((reject) => {
+      Object.defineProperty(navigator, 'clipboard', { configurable: true, value: {
+        writeText: async (text: string) => {
+          document.documentElement.dataset.copied = text;
+          document.documentElement.dataset.copyCount = String(Number(document.documentElement.dataset.copyCount ?? 0) + 1);
+          if (reject) throw new Error('Permission denied');
+        },
+      } });
+    }, reject);
+    const dialog = o.locator('#report-dialog');
+    const copy = o.getByRole('button', { name: 'Copy report number', exact: true });
+    await o.getByRole('button', { name: 'Send to Support', exact: true }).click();
+    await expect(copy).toBeVisible({ timeout: 15_000 });
+    const id = (await o.locator('#report-id').textContent())!;
+    let copies = 0;
+    for (const activation of ['click', 'Enter', 'Space'] as const) {
+      if (activation === 'click') await copy.click();
+      else await copy.press(activation);
+      await expect(o.locator('html')).toHaveAttribute('data-copied', id);
+      await expect(o.locator('html')).toHaveAttribute('data-copy-count', String(++copies));
+      await expect(o.locator('#report-copy-feedback')).toHaveText(reject
+        ? 'Could not copy. Select the report number and copy it manually.' : 'Copied');
+      await expect(dialog).toBeVisible();
+    }
+    await dialog.screenshot({ animations: 'disabled', path: test.info().outputPath('report-copy.png') });
+    await o.waitForTimeout(3600);
+    await expect(dialog).toBeVisible();
+    await expect(o.locator('#report-id')).toHaveText(id);
+    await expect(o.locator('#report-done b')).toHaveText('Sent, thank you');
+    if (!reject) await expect(o.locator('#report-copy-feedback')).toBeEmpty();
+    expect(await reports()).toHaveLength(1);
+    if (reject) {
+      await o.getByRole('button', { name: 'Close', exact: true }).focus();
+      await o.waitForTimeout(3600);
+      await expect(dialog).toBeVisible();
+    }
+    await o.getByRole('button', { name: 'Close', exact: true }).click();
+    await expect(dialog).toBeHidden();
+    // Reuse the same page and report UI. Feedback from the previous report must be gone.
+    await o.evaluate(() => { location.hash = '#report'; });
+    await expect(dialog).toBeVisible();
+    await expect(o.locator('#report-copy-feedback')).toBeEmpty();
+    await expect(o.locator('#report-id')).toBeEmpty();
+    await o.getByRole('button', { name: 'Send to Support', exact: true }).click();
+    await expect(copy).toBeVisible();
+    const nextId = (await o.locator('#report-id').textContent())!;
+    expect(nextId).not.toBe(id);
+    await copy.click();
+    await expect(o.locator('html')).toHaveAttribute('data-copied', nextId);
+    if (!reject) {
+      // An old clipboard promise and dismissal timer cannot affect a later report.
+      await o.evaluate(() => {
+        Object.defineProperty(navigator, 'clipboard', { configurable: true, value: {
+          writeText: () => new Promise<void>((resolve) => {
+            (window as unknown as { finishCopy: () => void }).finishCopy = resolve;
+          }),
+        } });
+      });
+      await copy.click();
+      await o.evaluate(() => { location.hash = '#report'; });
+      await expect(o.locator('#report-done')).toBeHidden();
+      await o.evaluate(() => { (window as unknown as { finishCopy: () => void }).finishCopy(); });
+      await expect(o.locator('#report-copy-feedback')).toBeEmpty();
+      await expect(o.locator('#report-id')).toBeEmpty();
+      await o.waitForTimeout(3600);
+      await expect(dialog).toBeVisible();
+      await o.getByRole('button', { name: 'Send to Support', exact: true }).click();
+      await expect(copy).toBeVisible();
+    }
+    await o.locator('#report-done b').click();
+    await expect(dialog).toBeHidden();
+    await o.close();
+  });
+}

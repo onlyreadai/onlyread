@@ -84,6 +84,13 @@ export async function openReport(key?: string): Promise<void> {
   sent = false;
   result('');
   clearTimeout(closeTimer);
+  clearTimeout(animationTimer);
+  clearTimeout(feedbackTimer);
+  copyGeneration++;
+  copying = false;
+  $('report-id').textContent = '';
+  $('report-copy-feedback').textContent = '';
+  $('report-copy-feedback').dataset.failed = 'false';
   dialog().classList.remove('closing');
   $('report-done').hidden = true;
   $('report-form').hidden = false;
@@ -128,7 +135,7 @@ async function sendReport(): Promise<void> {
     $('report-id').textContent = r.id;
     $('report-form').hidden = true;
     $('report-done').hidden = false;
-    closeTimer = setTimeout(closeAnimated, DONE_MS);
+    scheduleClose();
   } else {
     result(r.error, 'err');
     preview();
@@ -138,6 +145,42 @@ async function sendReport(): Promise<void> {
 /** How long the "Sent" card stays before the dialog closes: time to read the report's number. */
 const DONE_MS = 3200;
 let closeTimer: ReturnType<typeof setTimeout> | undefined;
+let feedbackTimer: ReturnType<typeof setTimeout> | undefined;
+let animationTimer: ReturnType<typeof setTimeout> | undefined;
+let copyGeneration = 0;
+let copying = false;
+
+function scheduleClose(): void {
+  clearTimeout(closeTimer);
+  if (!sent || copying || document.activeElement === $('report-copy') || $('report-copy-feedback').dataset.failed === 'true') return;
+  closeTimer = setTimeout(closeAnimated, DONE_MS);
+}
+
+async function copyReport(): Promise<void> {
+  if (copying || !sent) return;
+  const generation = copyGeneration;
+  const id = $('report-id').textContent ?? '';
+  copying = true;
+  clearTimeout(feedbackTimer);
+  clearTimeout(closeTimer);
+  try {
+    await navigator.clipboard.writeText(id);
+    if (generation !== copyGeneration) return;
+    $('report-copy-feedback').textContent = 'Copied';
+    clearTimeout(feedbackTimer);
+    feedbackTimer = setTimeout(() => { $('report-copy-feedback').textContent = ''; }, 2000);
+    $('report-copy-feedback').dataset.failed = 'false';
+  } catch {
+    if (generation !== copyGeneration) return;
+    $('report-copy-feedback').textContent = 'Could not copy. Select the report number and copy it manually.';
+    $('report-copy-feedback').dataset.failed = 'true';
+  } finally {
+    if (generation === copyGeneration) {
+      copying = false;
+      scheduleClose();
+    }
+  }
+}
 
 /** Closes the dialog with its closing animation (at once when motion is reduced). */
 function closeAnimated(): void {
@@ -146,7 +189,7 @@ function closeAnimated(): void {
   if (!d.open || d.classList.contains('closing')) return;
   if (matchMedia('(prefers-reduced-motion: reduce)').matches) { d.close(); return; }
   d.classList.add('closing');
-  setTimeout(() => { d.close(); d.classList.remove('closing'); }, 280);
+  animationTimer = setTimeout(() => { d.close(); d.classList.remove('closing'); }, 280);
 }
 
 /** `#report` in the address: the Activity list, with the dialog on the newest refusal. */
@@ -167,8 +210,19 @@ export function mountReport(): void {
     event.preventDefault();
     sendButton.click();
   });
-  $('report-done').addEventListener('click', closeAnimated);
-  dialog().addEventListener('close', () => { clearTimeout(closeTimer); });
+  $('report-done-close').addEventListener('click', (event) => { event.stopPropagation(); closeAnimated(); });
+  $('report-copy').addEventListener('click', (event) => {
+    event.stopPropagation();
+    void copyReport();
+  });
+  $('report-copy').addEventListener('focus', () => { clearTimeout(closeTimer); });
+  $('report-copy').addEventListener('blur', scheduleClose);
+  $('report-done').addEventListener('click', (event) => {
+    // Keep the number selectable for manual copying.
+    if ((event.target as HTMLElement).closest('#report-id, #report-copy-feedback')) return;
+    closeAnimated();
+  });
+  dialog().addEventListener('close', () => { clearTimeout(closeTimer); clearTimeout(feedbackTimer); copyGeneration++; copying = false; });
   $('report-details').addEventListener('toggle', preview);
   $('report-note').addEventListener('input', () => { count(); preview(); });
   $('report-email').addEventListener('input', preview);
