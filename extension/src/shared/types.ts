@@ -545,6 +545,9 @@ export interface SettingsLock {
   pinSet: boolean;
   /** The PIN was entered in the last few minutes. */
   pinUnlocked: boolean;
+  /** When the PIN unlock ends (ms since epoch), present while `pinUnlocked`: lets a page act at that moment instead of
+   *  waiting for its next poll. Absent from an older or partial status: then nothing is scheduled. */
+  pinUnlockedUntil?: number;
 }
 
 export type Message =

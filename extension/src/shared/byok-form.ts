@@ -4,6 +4,8 @@
 // `secrets.keys` by the background (secrets:key), like the choice itself (policy.judge.byok).
 import type { Policy } from './types';
 import { send } from './messaging';
+import { mountKeyReveal } from './key-reveal';
+import type { SettingsLock } from './types';
 import { PROVIDERS, isProviderId, type ByokChoice, type KeyId, type Secrets } from './providers';
 
 const byId = <T extends HTMLElement = HTMLElement>(id: string): T | null => document.getElementById(id) as T | null;
@@ -37,6 +39,12 @@ interface ByokForm {
    *  force only once they pass (background messages.ts chooseByok). `problem`: not testable yet (no key);
    *  `error`: tested, and the test failed. Either way the judge in force is left as it was. */
   save(): Promise<SaveResult>;
+  /** The settings lock, for the show/hide button on the key field (it stays off while the settings are locked). */
+  setLock(lock: SettingsLock | undefined): void;
+  /** Take a place in line for a lock read; only the newest read's result is applied (see key-reveal.ts). */
+  beginLockRead(): (lock: SettingsLock | undefined) => void;
+  /** Put the key field back to hidden (a Save and test that stops before it reaches `save()`). */
+  hideKey(): void;
   removeKey(): Promise<void>;
 }
 
@@ -77,6 +85,7 @@ export async function mountByokForm(): Promise<ByokForm> {
   const provider = byId<HTMLSelectElement>('byok-provider')!;
   const key = byId<HTMLInputElement>('api-key')!;
   const model = byId<HTMLSelectElement>('byok-model');
+  const reveal = mountKeyReveal(key, byId<HTMLButtonElement>('key-reveal'));
 
   provider.replaceChildren(...Object.values(PROVIDERS).map((spec) => {
     const o = document.createElement('option');
@@ -96,6 +105,7 @@ export async function mountByokForm(): Promise<ByokForm> {
     markTiles();
     key.placeholder = spec.keyPlaceholder;
     key.value = secrets.keys?.[spec.id] ?? '';
+    reveal.loaded(secrets.keys?.[spec.id]);
     const savedMark = byId('byok-saved');
     if (savedMark) savedMark.hidden = !secrets.keys?.[spec.id];
     const clear = byId('clear-key'); // "Remove key" only when there is one
@@ -124,12 +134,18 @@ export async function mountByokForm(): Promise<ByokForm> {
   await reload();
   return {
     choice,
+    setLock: reveal.setLock,
+    beginLockRead: reveal.beginLockRead,
+    hideKey: reveal.hide,
     async save() {
-      const r = await send<SaveResult & { error?: string }>({ type: 'judge:byok', choice: choice(), key: key.value.trim() || undefined });
-      // Passed: stored now, and the saved mark says so. Failed: nothing changed, and the form keeps what was typed and
-      // the provider picked, to put right and try again.
-      if (r.ok) { key.value = ''; await reload(); }
-      return r;
+      reveal.hide(); // hidden for every attempt, a failed one included
+      try {
+        const r = await send<SaveResult & { error?: string }>({ type: 'judge:byok', choice: choice(), key: key.value.trim() || undefined });
+        // Passed: stored now, and the saved mark says so. Failed: nothing changed, and the form keeps what was typed and
+        // the provider picked, to put right and try again.
+        if (r.ok) { key.value = ''; await reload(); }
+        return r;
+      } finally { reveal.hide(); }
     },
     async removeKey() {
       await setKey(choice().id, undefined);
