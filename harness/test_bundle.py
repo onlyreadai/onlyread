@@ -40,6 +40,18 @@ class ManifestTests(unittest.TestCase):
                          ["http://localhost/*"])
         self.assertEqual(MANIFEST["name"], "OnlyRead")  # the working copy's manifest is left alone
 
+    def test_popup_shortcut(self):
+        # Chrome's built-in _execute_action opens the toolbar popup, exactly like a click on the icon. It needs no
+        # listener and no permission, and a release keeps it as the working copy has it.
+        self.assertEqual(MANIFEST["commands"], {"_execute_action": {"suggested_key": {"default": "Alt+Shift+O"}}})
+        self.assertEqual(MANIFEST["action"]["default_popup"], "popup.html")
+        for service_url in (None, DEV):
+            self.assertEqual(bundle.release_manifest(MANIFEST, service_url)["commands"], MANIFEST["commands"])
+        self.assertEqual(
+            [p for p in MANIFEST["permissions"]],
+            ["declarativeNetRequestWithHostAccess", "declarativeNetRequestFeedback", "storage", "webNavigation", "webRequest", "debugger", "favicon"],
+        )
+
 
 DEV = "https://foo.example"
 STORE_INFO = {"dist": True, "serviceUrl": ""}
