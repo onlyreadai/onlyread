@@ -51,7 +51,7 @@
     "e2e:replay:watch": "ONLYREAD_SERVICE_URL= npm run build && HEADED=1 playwright test e2e/replay.spec.ts"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^1.9.0"
+    "@anthropic-ai/sdk": "^1.12.0"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.8",
