@@ -308,7 +308,12 @@ function renderCounts(st: Status, sites: SiteView[], activity: ActivitySummary |
   $('side-sites').textContent = String(st.sites.length);
   const fromAccount = sites.filter((s) => s.account).length;
   $('t-account').textContent = st.cloud?.signedIn && fromAccount ? `${fromAccount} from your account` : '';
-  if (!activity) return;
+  if (!activity) {
+    setCount($('t-refused'), 0);
+    setActivityCount($('side-activity'), 0);
+    $('t-seen').textContent = '';
+    return;
+  }
   setCount($('t-refused'), activity.today.refused);
   setActivityCount($('side-activity'), activity.today.refused);
   // Out of every request OnlyRead checked on guarded sites today, reads included.

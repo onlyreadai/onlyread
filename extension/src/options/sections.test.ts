@@ -126,6 +126,8 @@ describe('setActivityCount', () => {
     expect(target.textContent).toBe('5');
     setActivityCount(target, 0);
     expect(target.textContent).toBe('');
+  });
+});
 // Section scrolling, driven directly: a real element in the document stands in for the settings section, and its
 // scrollIntoView is a mock, so no scrolling actually happens. Each test gets a clean DOM and the mocked globals
 // are restored afterwards.
