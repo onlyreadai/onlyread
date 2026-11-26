@@ -1135,6 +1135,17 @@ describe('refusedOutsideWrite', () => {
     S.pinUnlockedUntil = Date.now() + 60_000;
     expect(await refusedOutsideWrite({ settingsPin: { oldValue: pin } })).toBeUndefined();
   });
+  it('reports when the PIN unlock ends, only while it is unlocked', async () => {
+    const { settingsLock } = await import('./state');
+    expect(await settingsLock()).not.toHaveProperty('pinUnlockedUntil');
+    const until = Date.now() + 60_000;
+    S.pinUnlockedUntil = until;
+    expect(await settingsLock()).toMatchObject({ pinUnlocked: true, pinUnlockedUntil: until });
+    S.pinUnlockedUntil = Date.now() - 1;
+    const over = await settingsLock();
+    expect(over.pinUnlocked).toBe(false);
+    expect(over).not.toHaveProperty('pinUnlockedUntil');
+  });
   it('accepts a first judge key, refuses replacing one while an agent works', async () => {
     const { refusedOutsideWrite } = await import('./messages');
     S.agentSession = true;

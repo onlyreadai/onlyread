@@ -218,6 +218,7 @@
   #report-dialog .report-done[hidden] { display: none; }
   #report-dialog .report-done b { font: 800 18px/1.25 var(--display); letter-spacing: -0.02em; animation: done-rise .4s ease-out .45s both; }
   #report-dialog .report-done span { font-size: 13px; color: var(--muted); animation: done-rise .4s ease-out .6s both; }
+  #report-id { user-select: text; }
   #report-dialog .report-done code { font: 600 13px var(--mono); color: var(--fg); }
   .done-check { width: 60px; height: 60px; margin-bottom: 6px; fill: none; stroke: var(--accent); stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
   .done-check circle { stroke-dasharray: 145; stroke-dashoffset: 145; animation: done-draw .55s cubic-bezier(.65, 0, .45, 1) .05s forwards; }
@@ -245,7 +246,16 @@
   .field input, .field select { width: 100%; max-width: 460px; }
   /* The AI judge's form uses the card's whole width: the provider tiles side by side, the fields under them. */
   #ai-judge .field input, #ai-judge .field select, #ai-judge .usage { max-width: none; }
-  .field input[type=password] { font-family: var(--mono); font-size: 12.5px; }
+  .field input[type=password], .key-input input { font-family: var(--mono); font-size: 12.5px; }
+  .key-input { position: relative; display: flex; align-items: center; }
+  .key-input input { padding-right: 38px; }
+  .key-reveal { position: absolute; right: 4px; width: 30px; height: 30px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--muted); cursor: pointer; }
+  .key-reveal:hover:not(:disabled) { color: var(--fg); }
+  .key-reveal:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .key-reveal:disabled { opacity: .4; cursor: not-allowed; }
+  .key-reveal .eye-off { display: none; }
+  .key-reveal.on .eye-open { display: none; }
+  .key-reveal.on .eye-off { display: block; }
   select { font: inherit; font-size: 13px; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--line-strong); background: var(--card-2); color: var(--fg); }
   select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 16%, transparent); }
   .hint { color: var(--muted); font-size: 12.5px; line-height: 1.5; }
@@ -643,7 +653,10 @@
               </div>
               <div class="field">
                 <label for="api-key">API key <span class="key-saved" id="byok-saved" hidden>Key saved</span><a class="key-link" id="byok-keylink" target="_blank" rel="noopener">Get a key ↗</a></label>
-                <input id="api-key" type="password" autocomplete="off" />
+                <div class="key-input">
+                  <input id="api-key" type="password" autocomplete="off" />
+                  <button type="button" class="key-reveal" id="key-reveal" aria-label="Show key" aria-pressed="false" title="Show key" disabled><svg class="eye-open" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg><svg class="eye-off" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/><path d="M3 3l18 18"/></svg></button>
+                </div>
               </div>
               <details class="advanced">
                 <summary><svg class="chev" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>Advanced</summary>
@@ -795,6 +808,9 @@
         <svg class="done-check" viewBox="0 0 52 52" aria-hidden="true"><circle cx="26" cy="26" r="23"/><path d="m15 27 7.5 7.5L38 19"/></svg>
         <b>Sent, thank you</b>
         <span>Report number <code id="report-id"></code>. Mention it if you write to us.</span>
+        <button type="button" class="btn" id="report-copy" aria-describedby="report-copy-feedback">Copy report number</button>
+        <span id="report-copy-feedback" role="status" aria-live="polite"></span>
+        <button type="button" class="btn" id="report-done-close">Close</button>
       </div>
     </dialog>
 

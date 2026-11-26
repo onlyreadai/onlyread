@@ -72,7 +72,8 @@ export function agentAtWork(): boolean {
 /** What stops protection being lowered right now (protection.ts lockFor): an agent at work, a PIN not entered.
  *  Read by the settings messages and by the Pro account's site list (cloud-sync.ts) alike. */
 export async function settingsLock(): Promise<SettingsLock> {
-  return { agent: agentAtWork(), agentBrowser: S.agentBrowser, pinSet: Boolean(await storedPin()), pinUnlocked: Date.now() < S.pinUnlockedUntil };
+  const pinUnlocked = Date.now() < S.pinUnlockedUntil;
+  return { agent: agentAtWork(), agentBrowser: S.agentBrowser, pinSet: Boolean(await storedPin()), pinUnlocked, ...(pinUnlocked ? { pinUnlockedUntil: S.pinUnlockedUntil } : {}) };
 }
 
 export function hostOf(url: string): string {

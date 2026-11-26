@@ -19,6 +19,15 @@
   label a { font-weight: 500; }
   .field { margin-bottom: 12px; }
   .field input { width: 100%; }
+  .key-input { position: relative; display: flex; align-items: center; }
+  .key-input input { padding-right: 38px; font-family: var(--mono); font-size: 12px; }
+  .key-reveal { position: absolute; right: 4px; width: 30px; height: 30px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--muted); cursor: pointer; }
+  .key-reveal:hover:not(:disabled) { color: var(--fg); }
+  .key-reveal:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .key-reveal:disabled { opacity: .4; cursor: not-allowed; }
+  .key-reveal .eye-off { display: none; }
+  .key-reveal.on .eye-open { display: none; }
+  .key-reveal.on .eye-off { display: block; }
   select { font: inherit; font-size: 13px; width: 100%; padding: 9px 12px; border-radius: 11px; border: 1px solid var(--line-strong); background: var(--card-2); color: var(--fg); }
   select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 16%, transparent); }
   .row { display: flex; gap: 8px; align-items: center; }
@@ -106,7 +115,10 @@
     </div>
     <div class="field">
       <label for="api-key">API key <span class="key-saved" id="byok-saved" hidden>Key saved</span><a class="key-link" id="byok-keylink" target="_blank" rel="noopener">Get a key ↗</a></label>
-      <input id="api-key" type="password" autocomplete="off" />
+      <div class="key-input">
+        <input id="api-key" type="password" autocomplete="off" />
+        <button type="button" class="key-reveal" id="key-reveal" aria-label="Show key" aria-pressed="false" title="Show key" disabled><svg class="eye-open" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg><svg class="eye-off" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/><path d="M3 3l18 18"/></svg></button>
+      </div>
     </div>
     <div class="row"><button id="save-key" class="btn primary">Save and test</button></div>
     <div id="key-result" class="result"></div>

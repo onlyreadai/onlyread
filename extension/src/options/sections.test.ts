@@ -1,7 +1,6 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { setActivityCount, setCount } from './sections';
-
+import { setActivityCount, scrollToSection, setCount } from './sections';
 // The settings count animation, driven directly: a fake clock and a queue of animation frames stand in for the
 // browser, so no test sleeps. Each test gets a fresh element (the per-element state lives in a WeakMap) and the
 // mocked globals are restored afterwards.
@@ -127,5 +126,69 @@ describe('setActivityCount', () => {
     expect(target.textContent).toBe('5');
     setActivityCount(target, 0);
     expect(target.textContent).toBe('');
+// Section scrolling, driven directly: a real element in the document stands in for the settings section, and its
+// scrollIntoView is a mock, so no scrolling actually happens. Each test gets a clean DOM and the mocked globals
+// are restored afterwards.
+describe('scrollToSection', () => {
+  let reduced = false;
+
+  beforeEach(() => {
+    reduced = false;
+    document.body.innerHTML = '';
+    vi.stubGlobal('matchMedia', (_query: string): MediaQueryList => ({
+      matches: reduced,
+      media: '(prefers-reduced-motion: reduce)',
+      onchange: null,
+      addListener: () => {},
+      removeListener: () => {},
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      dispatchEvent: () => false,
+    }));
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    document.body.innerHTML = '';
+  });
+
+  /** A section in the document whose scrollIntoView is a mock; returns the element and the mock. */
+  const section = (id: string): { el: HTMLElement; scroll: ReturnType<typeof vi.fn> } => {
+    const el = document.createElement('section');
+    el.id = id;
+    document.body.append(el);
+    const scroll = vi.fn();
+    el.scrollIntoView = scroll;
+    return { el, scroll };
+  };
+
+  it('scrolls an existing target smoothly when motion is not reduced', () => {
+    const { scroll } = section('general');
+    scrollToSection('general');
+    expect(scroll).toHaveBeenCalledTimes(1);
+    expect(scroll).toHaveBeenCalledWith({ behavior: 'smooth', block: 'start' });
+  });
+
+  it('scrolls an existing target at once when motion is reduced', () => {
+    reduced = true;
+    const { scroll } = section('general');
+    scrollToSection('general');
+    expect(scroll).toHaveBeenCalledTimes(1);
+    expect(scroll).toHaveBeenCalledWith({ behavior: 'auto', block: 'start' });
+  });
+
+  it('scrolls only the requested section', () => {
+    const { scroll } = section('general');
+    const other = section('privacy');
+    scrollToSection('privacy');
+    expect(scroll).not.toHaveBeenCalled();
+    expect(other.scroll).toHaveBeenCalledTimes(1);
+    expect(other.scroll).toHaveBeenCalledWith({ behavior: 'smooth', block: 'start' });
+  });
+
+  it('a missing target is a safe no-op: no exception and no scroll call', () => {
+    const { scroll } = section('general');
+    expect(() => scrollToSection('missing')).not.toThrow();
+    expect(scroll).not.toHaveBeenCalled();
   });
 });
