@@ -112,6 +112,41 @@ test('the settings page lists the account\'s sites and this browser\'s apart, sh
   await options.close();
 });
 
+test('site search announces visible guarded rows and suggestions as the lists change', async () => {
+  const options = await optionsPage();
+  await options.setViewportSize({ width: 375, height: 800 });
+  const search = options.getByRole('searchbox', { name: 'Search sites' });
+  const summary = options.locator('#site-search-summary');
+  await expect(summary).toHaveAttribute('role', 'status');
+  await expect(options.locator('#sites .site-row[data-id="other.example"]')).toBeVisible();
+  await search.fill('  OTHER.EXAMPLE ');
+  await expect(summary).toHaveText('1 guarded site · 0 suggestions');
+  await expect(search).toBeFocused();
+  await options.locator('.sites > .search').screenshot({ path: 'test-results/ui/site-search-match.png' });
+
+  await search.fill(' FiXtUrE ');
+  await expect(summary).toHaveText('1 guarded site · 0 suggestions');
+  await options.locator('#account-section').evaluate((group) => group.setAttribute('hidden', ''));
+  await search.dispatchEvent('input');
+  await expect(summary).toHaveText('No sites or suggestions match.');
+  await options.locator('#account-section').evaluate((group) => group.removeAttribute('hidden'));
+
+  await search.fill('not-a-site.invalid');
+  await expect(summary).toHaveText('No sites or suggestions match.');
+  await expect(search).toBeFocused();
+  await options.locator('.sites > .search').screenshot({ path: 'test-results/ui/site-search-zero.png' });
+  await search.fill('   ');
+  await expect(summary).toBeEmpty();
+  await search.fill(' LiNeAr ');
+  await expect(summary).toHaveText('0 guarded sites · 1 suggestion');
+  await options.getByRole('button', { name: 'Add Linear' }).click();
+  await expect(summary).toHaveText('1 guarded site · 0 suggestions');
+  await expect(options.locator('#sites .site-row[data-id="linear"]')).toBeVisible();
+  await search.clear();
+  await expect(summary).toBeEmpty();
+  await options.close();
+});
+
 test('a list that drops a site waits while an agent works; the account is not changed from here', async () => {
   const options = await optionsPage();
   const fixture = options.locator('#account-sites .site-row[data-id="127.0.0.1"]');

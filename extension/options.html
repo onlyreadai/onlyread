@@ -112,6 +112,8 @@
   .switch:active input:not(:disabled):checked + span::before { transform: translateX(14px); }
   .search { padding: 12px 20px; border-bottom: 1px solid var(--line); }
   .search input { width: 100%; }
+  .search-summary { margin: 0; font-size: 13px; color: var(--muted); }
+  .search-summary:not(:empty) { margin-top: 6px; }
   input[type=search] { font: inherit; font-size: 13.5px; padding: 9px 12px; border-radius: 11px; border: 1px solid var(--line-strong); background: var(--card-2); color: var(--fg); }
   input[type=search]:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 16%, transparent); }
   .add-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 12px 20px; border-top: 1px solid var(--line); background: var(--card-2); }
@@ -585,7 +587,10 @@
             </div>
           </div>
           <div class="card list sites">
-            <div class="search"><input id="site-search" type="search" placeholder="Search sites" aria-label="Search sites" autocomplete="off" spellcheck="false"></div>
+            <div class="search">
+              <input id="site-search" type="search" placeholder="Search sites" aria-label="Search sites" autocomplete="off" spellcheck="false">
+              <p class="search-summary" id="site-search-summary" role="status"></p>
+            </div>
             <!-- The account's list is edited on the account page (and a site moved there with "Add to account" in a row's
                  menu); it is fetched when this page opens or is shown again, and as soon as the account page saves. -->
             <!-- With your own key: one line inviting to Pro, where the account would be. -->
