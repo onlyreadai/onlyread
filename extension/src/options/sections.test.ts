@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { setActivityCount, scrollToSection, setCount } from './sections';
+import { clearCount, setActivityCount, scrollToSection, setCount } from './sections';
 // The settings count animation, driven directly: a fake clock and a queue of animation frames stand in for the
 // browser, so no test sleeps. Each test gets a fresh element (the per-element state lives in a WeakMap) and the
 // mocked globals are restored afterwards.
@@ -102,6 +102,22 @@ describe('setCount', () => {
     setCount(target, 0);
     expect(target.textContent).toBe('0');
     expect(frames).toHaveLength(0);
+  });
+});
+
+describe('clearCount', () => {
+  it('clears the displayed count and resets its cached value', () => {
+    const target = document.createElement('span');
+    vi.stubGlobal('matchMedia', () => ({ matches: true }));
+
+    setCount(target, 5);
+    expect(target.textContent).toBe('5');
+
+    clearCount(target);
+    expect(target.textContent).toBe('');
+
+    setCount(target, 5);
+    expect(target.textContent).toBe('5');
   });
 });
 
