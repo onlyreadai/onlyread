@@ -37,6 +37,11 @@ export function installSidebar(nav: HTMLElement): void {
 }
 
 const shown = new WeakMap<HTMLElement, number>();
+/** Clear a count and reset its cached value so it can be set again later. */
+export function clearCount(el: HTMLElement): void {
+  shown.delete(el);
+  el.textContent = '';
+}
 
 /** Set a count; the first time, it counts up from zero (an ease-out over 0.9 s), unless motion is reduced. */
 export function setCount(el: HTMLElement, value: number): void {
@@ -52,4 +57,9 @@ export function setCount(el: HTMLElement, value: number): void {
     if (k < 1) requestAnimationFrame(step);
   };
   requestAnimationFrame(step);
+}
+
+/** Show the Activity badge only when there are refused writes today. */
+export function setActivityCount(el: HTMLElement, value: number): void {
+  el.textContent = value > 0 ? String(value) : '';
 }

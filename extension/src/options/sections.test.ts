@@ -1,7 +1,6 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { scrollToSection, setCount } from './sections';
-
+import { clearCount, setActivityCount, scrollToSection, setCount } from './sections';
 // The settings count animation, driven directly: a fake clock and a queue of animation frames stand in for the
 // browser, so no test sleeps. Each test gets a fresh element (the per-element state lives in a WeakMap) and the
 // mocked globals are restored afterwards.
@@ -106,6 +105,45 @@ describe('setCount', () => {
   });
 });
 
+describe('clearCount', () => {
+  it('clears the displayed count and resets its cached value', () => {
+    const target = document.createElement('span');
+    vi.stubGlobal('matchMedia', () => ({ matches: true }));
+
+    setCount(target, 5);
+    expect(target.textContent).toBe('5');
+
+    clearCount(target);
+    expect(target.textContent).toBe('');
+
+    setCount(target, 5);
+    expect(target.textContent).toBe('5');
+  });
+});
+
+describe('setActivityCount', () => {
+  const el = (): HTMLElement => document.createElement('span');
+
+  it('hides the badge when the count is zero', () => {
+    const target = el();
+    setActivityCount(target, 0);
+    expect(target.textContent).toBe('');
+  });
+
+  it('shows a positive refused-write count', () => {
+    const target = el();
+    setActivityCount(target, 5);
+    expect(target.textContent).toBe('5');
+  });
+
+  it('clears the badge when the count changes from positive to zero', () => {
+    const target = el();
+    setActivityCount(target, 5);
+    expect(target.textContent).toBe('5');
+    setActivityCount(target, 0);
+    expect(target.textContent).toBe('');
+  });
+});
 // Section scrolling, driven directly: a real element in the document stands in for the settings section, and its
 // scrollIntoView is a mock, so no scrolling actually happens. Each test gets a clean DOM and the mocked globals
 // are restored afterwards.
