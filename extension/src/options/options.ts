@@ -166,19 +166,35 @@ function addNote(text: string, kind: '' | 'ok' | 'err' | 'warn', where: Section)
 
 const emptyLine = (text: string, cls = '') => textEl('div', `empty ${cls}`.trim(), text);
 
+function filterSiteMatches(items: HTMLElement[], query: string): number {
+  for (const item of items) item.hidden = Boolean(query) && !item.dataset.search?.includes(query);
+  return items.filter((item) => !item.hidden).length;
+}
+
+function siteMatchSummary(query: string, guarded: number, suggestions: number): string {
+  if (!query) return '';
+  if (guarded === 0 && suggestions === 0) return 'No sites or suggestions match.';
+  return `${guarded} guarded ${guarded === 1 ? 'site' : 'sites'} · ${suggestions} ${suggestions === 1 ? 'suggestion' : 'suggestions'}`;
+}
+
 /** The search box: rows whose name or domains hold the text stay; a group with none left says so. The popular-site
  *  chips follow the same rule, and their block goes away when no chip is left. */
 function applySearch(): void {
   const q = $<HTMLInputElement>('site-search').value.trim().toLowerCase();
+  let guarded = 0;
   for (const group of [$('account-sites'), $('sites')]) {
     const rows = [...group.querySelectorAll<HTMLElement>('.site-row')];
-    for (const r of rows) r.hidden = Boolean(q) && !r.dataset.search?.includes(q);
+    const matches = filterSiteMatches(rows, q);
+    if (!group.closest('[hidden]')) guarded += matches;
     group.querySelector('.nomatch')?.remove();
-    if (q && rows.length && rows.every((r) => r.hidden)) group.append(emptyLine('No site here matches your search.', 'nomatch'));
+    if (q && rows.length && matches === 0) group.append(emptyLine('No site here matches your search.', 'nomatch'));
   }
   const chips = [...$('popular-chips').querySelectorAll<HTMLElement>('.chip')];
-  for (const chip of chips) chip.hidden = Boolean(q) && !chip.dataset.search?.includes(q);
-  $('popular').hidden = chips.length === 0 || chips.every((chip) => chip.hidden);
+  const suggestions = filterSiteMatches(chips, q);
+  $('popular').hidden = suggestions === 0;
+  const summary = $('site-search-summary');
+  const text = siteMatchSummary(q, guarded, suggestions);
+  if (summary.textContent !== text) summary.textContent = text;
 }
 $('site-search').addEventListener('input', applySearch);
 
